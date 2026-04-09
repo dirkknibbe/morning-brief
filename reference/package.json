@@ -1,0 +1,12 @@
+{
+  "name": "morning-brief",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "brief": "bun run src/index.ts",
+    "test": "bun run src/index.ts --dry-run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  }
+}
