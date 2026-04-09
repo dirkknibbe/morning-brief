@@ -27,8 +27,10 @@ export function parseAction(date: string, briefsDir = "briefs"): ParsedAction {
 
   const body = readFileSync(briefPath, "utf8");
 
-  // Match "*Action for today:*" (telegram bold) or "**Action for today:**" (md bold).
-  const re = /\*{1,2}Action(?:\s+for\s+today)?:\*{1,2}\s*([\s\S]+?)(?:\n\s*\n|$)/i;
+  // Match any bold-wrapped line containing "Action" followed by a colon
+  // (inside or outside the asterisks) and the action text. Tolerates emoji
+  // prefixes, "Action for today" vs "Action item for today" etc.
+  const re = /\*{1,2}[^*\n]*\bAction\b[^*\n]*\*{1,2}\s*:?\s*([\s\S]+?)(?:\n\s*\n|$)/i;
   const m = body.match(re);
   if (!m) throw new Error(`No "Action for today" block in ${briefPath}`);
 
