@@ -34,7 +34,7 @@ For research / build-plan actions, run an iterative investigation:
 
 - Break the action into 3-6 sub-questions (e.g. "who are existing players", "what's the pricing pattern", "what's the technical minimum viable scope", "what's the distribution channel").
 - For each sub-question, fetch 1-3 relevant URLs (GitHub repos, docs, HN threads, Reddit posts). Cap total fetches at 12; **stop fetching as soon as the TL;DR writes itself** — over-fetching burns context without changing the answer.
-- For HN / web URLs → `ctx_fetch_and_index` then `ctx_search`. **Batch all `ctx_search` queries into a single call** to keep context clean.
+- For HN / web URLs → `WebFetch` with a targeted extraction prompt. In local sessions where context-mode is active, fall back to `ctx_fetch_and_index` + `ctx_search` (batch all search queries into a single call to keep context clean).
 - For Reddit URLs → `bun run reddit <url>`.
 - For each source, note one concrete takeaway.
 
