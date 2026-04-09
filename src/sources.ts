@@ -247,8 +247,32 @@ export async function fetchAllSources(): Promise<{
 // ── CLI entrypoint ────────────────────────────────────────────────────
 
 if (import.meta.main) {
-  const pretty = process.argv.includes("--pretty");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
   const data = await fetchAllSources();
-  const json = JSON.stringify(data, null, pretty ? 2 : 0);
-  process.stdout.write(json + "\n");
+
+  // Truncate summaries in-place so downstream consumers don't eat huge blobs.
+  for (const arr of [data.hn, data.reddit, data.github]) {
+    for (const it of arr) {
+      if (it.summary && it.summary.length > 240) it.summary = it.summary.slice(0, 240) + "…";
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  mkdirSync("data", { recursive: true });
+  const outPath = join("data", `fetch-${today}.json`);
+  writeFileSync(outPath, JSON.stringify(data, null, 2));
+
+  // Compact summary to stdout: counts, path, top 3 titles per source.
+  const summary = {
+    path: outPath,
+    counts: { hn: data.hn.length, reddit: data.reddit.length, github: data.github.length },
+    top: {
+      hn: data.hn.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
+      reddit: data.reddit.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
+      github: data.github.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
+    },
+  };
+  process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
 }
