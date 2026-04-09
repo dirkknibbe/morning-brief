@@ -1,40 +1,41 @@
 ---
 date: 2026-04-09
 classification: build-plan
-action: Spin up Silent-Degradation Canary — 5 fixed prompts × 4 providers, daily run, public page
-source_brief: briefs/2026-04-09.md
+action: Build a silent-degradation-canary script that tests Claude API daily and alerts on quality drops, then open-source it as a lead magnet for a Model Canary SaaS
+source_brief: briefs/2026-04-09-rerun.md
 ---
 
 ## TL;DR
-The wedge is real but crowded: artificialanalysis.ai, llm-stats.com, and simonw's llm-bench already publish daily-ish provider comparisons. None of them frame it as *silent degradation* — they're leaderboards, not canaries. That framing is the only defensible moat, so the v0 must lean hard into "did today's GPT-5 get dumber than yesterday's?" with diffable outputs and a visible delta feed, not a score table. Build it as a single GitHub Actions cron + static site in a day, ship to a subdomain, post the link in the r/ClaudeAI/r/LocalLLaMA threads where the 2,759 upvotes live. Do **not** build a SaaS — this is a credibility asset, not a product.
 
-## Key findings (from prior knowledge — fetch tooling broken this session)
-- **artificialanalysis.ai** runs continuous benchmarks across ~30 models but reports aggregate quality/price/speed, no per-prompt diffs.
-- **llm-stats.com** and **openrouter.ai/rankings** publish snapshots; neither surfaces *regression events*.
-- **simonw/llm** + `llm-bench` shows the one-file pattern works: a YAML of prompts, run via CLI, dump JSON.
-- **OpenAI Evals** and **promptfoo** are the obvious eval frameworks; promptfoo has built-in multi-provider + HTML report and is probably the fastest path to v0.
-- The Reddit pain point is qualitative ("feels dumber this week"), so the canary's job is to *prove or disprove the vibe* with a diff, not to produce another leaderboard number.
+The "LLM drift" problem is real and well-documented (Chen, Zaharia & Zou 2023 showed GPT-4 accuracy dropping 33 points between March-June 2023). But the monitoring space is already crowded: Braintrust ($80M Series B), Langfuse (acquired by ClickHouse), Helicone, and Artificial Analysis all cover quality tracking. A standalone canary script is a fine weekend project but a weak lead magnet — the people who'd use it already use one of these platforms. If you still want to ship it, scope it to a single TypeScript file, not a repo, and position it as a "poor man's eval" blog post rather than a SaaS wedge.
+
+## Key findings
+
+- **LLM drift is empirically proven.** The Stanford paper (Chen et al. 2023) documented GPT-4 dropping from 84% to 51% on prime-number identification in 3 months, partly due to reduced chain-of-thought compliance. This validated the widespread "GPT-4 is getting dumber" complaints. (source: https://arxiv.org/abs/2307.09009)
+- **The monitoring market is saturated.** Braintrust ($80M B), Langfuse (25K GitHub stars, ClickHouse-acquired), and Helicone (5.2K stars) all offer production LLM observability with traces, evals, alerts, and dashboards. All have free tiers. (sources: braintrust.dev, langfuse.com, helicone.ai)
+- **Artificial Analysis already does model-level benchmarking publicly.** They track intelligence scores, speed, and price across all major models with continuous updates — the exact "canary" function but at industry scale. (source: https://artificialanalysis.ai)
+- **OpenAI Evals and RAGAS are the canonical open-source eval frameworks.** Any open-source canary would be compared against them immediately. (sources: github.com/openai/evals, github.com/explodinggradients/ragas)
+- **Claude API pricing makes daily runs cheap but not free.** At ~$10/M tokens for Opus 4.6 and ~$6/M for Sonnet 4.6, 5 reasoning tests daily would cost pennies — but multiplied across models and users, it adds up fast for a SaaS.
+- **The "lead magnet" theory is shaky.** Devs who care about model quality regression are already sophisticated enough to use Braintrust or Langfuse. A canary script would attract tire-kickers, not paying SaaS customers.
 
 ## Existing players / prior art
-- artificialanalysis.ai — continuous multi-provider leaderboard — https://artificialanalysis.ai
-- llm-stats.com — snapshot comparisons — https://llm-stats.com
-- promptfoo — OSS eval framework w/ HTML report — https://github.com/promptfoo/promptfoo
-- simonw/llm-bench — minimal CLI eval pattern — https://github.com/simonw/llm-bench
-- OpenRouter rankings — provider usage leaderboard — https://openrouter.ai/rankings
+
+- **Braintrust** — Full eval + observability platform, $80M Series B — https://braintrust.dev
+- **Langfuse** — Open-source LLM engineering platform, acquired by ClickHouse — https://langfuse.com
+- **Helicone** — AI gateway + observability, YC-backed — https://helicone.ai
+- **Artificial Analysis** — Public model benchmarking and comparison — https://artificialanalysis.ai
+- **OpenAI Evals** — Open-source eval framework and benchmark registry — https://github.com/openai/evals
+- **RAGAS** — Open-source LLM evaluation focused on RAG pipelines — https://github.com/explodinggradients/ragas
+- **promptfoo** — OSS eval framework with multi-provider support + HTML reports — https://github.com/promptfoo/promptfoo
 
 ## Concrete next steps for Dirk
-1. **Pick 5 prompts that expose regression, not capability.** Candidates: a tricky multi-step arithmetic, a subtle instruction-following trap, a long-context recall needle, a refusal-calibration probe, a code-edit with a one-line subtle bug. These must have *stable, checkable* expected outputs so diffs are meaningful.
-2. **Use promptfoo, not from scratch.** `promptfoo eval -c canary.yaml --output results/$(date -I).json` in a GitHub Action on a daily cron. Commit results to the repo — the git history *is* the canary.
-3. **Static site = `index.html` that reads the last 30 JSONs and renders a grid of ✅/⚠️/❌ per (prompt, provider, day), with click-to-diff against yesterday's raw output.** Deploy via GitHub Pages. Zero backend.
-4. **Providers:** OpenAI (gpt-5), Anthropic (claude-opus-4-6), Google (gemini-2.5-pro), and one OSS via OpenRouter (llama-4 or deepseek). Budget: ~$0.50/day at current prices.
-5. **Distribution:** after 7 days of data (so the first regression event has a chance to land), post to the same r/ClaudeAI thread with "I built this because of your post." Do not launch-post on day 0 — an empty canary has no credibility.
-6. **First PR scope:** repo skeleton + `canary.yaml` with 5 prompts + GH Actions workflow + stub `index.html`. Nothing else. Merge, then iterate.
 
-## Risks
-- **Prompt rot:** if prompts are too capability-heavy, every model passes every day → no signal. Bias toward brittle, deterministic checks.
-- **Provider API key rotation** in CI — use GH Secrets, fail loud on 401.
-- **Crowded space** — the only differentiator is the *framing*. If the landing page says "another LLM leaderboard" it's dead.
+1. **Skip the repo, write a blog post instead.** A "How I monitor Claude for silent regressions" post with an embedded single-file TypeScript gist generates more leads than an empty GitHub repo. Cite the Stanford paper for credibility.
+2. **If you still want to build it:** scope to one `canary.ts` file (~100 lines), 5 hardcoded reasoning prompts, a JSON log file (skip MongoDB for v0), and a Telegram alert. Ship it in this repo under `scripts/`, not as a separate repo. Total build time: 2-3 hours.
+3. **For the SaaS angle:** differentiation would need to be *opinionated test suites per use case* (e.g. "medical reasoning canary", "code generation canary") rather than generic quality tracking. Validate demand by posting the blog to HN and measuring waitlist signups before writing any SaaS code.
 
 ## Open questions
-- Is the r/ClaudeAI 2,759-upvote thread still live / is the audience still hot on 2026-04-09, or has the narrative moved on? (Couldn't verify — fetch tooling blocked this session.)
-- Does promptfoo's HTML report support historical diffs, or does that need a custom viewer? (Likely custom.)
+
+- Do Anthropic's versioned model IDs (e.g. `claude-sonnet-4-20250514`) actually drift, or is drift only a problem with unversioned aliases? If versioned IDs are stable, the canary only matters at upgrade-decision time, not continuously.
+- What 5 reasoning tests would be both stable enough to benchmark against and sensitive enough to detect 15% quality drops? The Stanford paper used math, code, and multi-hop QA — a good starting set.
+- Is there a market for *provider-agnostic* canaries (test OpenAI + Anthropic + Google simultaneously) that none of the existing platforms serve well?
