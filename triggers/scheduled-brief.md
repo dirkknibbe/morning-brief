@@ -9,7 +9,7 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 
 - `Bash` — run the fetch and send CLIs, plus git commands.
 - `bun run web <url>` — **primary fetch path** for HN/web URLs (cleaned HTML→text, 8000-char cap, works in headless runs). `bun run reddit <url>` for Reddit.
-- `mcp__mongodb__find` / `insert-many` / `update-many` / `aggregate` — read/write state in the `morning-brief` database.
+- `bun run src/brief-state.ts <mode>` — MongoDB helpers for dedupe / themes / signals (see steps 2, 3, 8). Do NOT use `mcp__mongodb__*` MCP tools — they are unavailable in headless runs.
 - `Write` — create `briefs/<today>.md`.
 
 ## About Dirk (context for synthesis)
@@ -28,27 +28,27 @@ Run `bun run fetch` via Bash. It writes the full payload to `data/fetch-<today>.
 
 ### 2. Dedupe against `seen_items`
 
-For all item `id`s, call `mcp__mongodb__find` on `seen_items` with `{_id: {$in: [...ids]}}` to see which are already known. Then:
+Run via Bash:
 
-- For new items: insert with `{_id, source, title, url, first_seen: now, last_seen: now, times_seen: 1, last_score}`.
-- For returning items: `update-many` to bump `last_seen`, `times_seen += 1`, update `last_score`.
+```bash
+bun run src/brief-state.ts dedupe data/fetch-<today>.json
+```
 
-Annotate each item in-memory as `isNew` or `isReturning` (and note `times_seen` for returning items — "seen 3 days running" is worth surfacing).
+This reads the fetch JSON, checks all item IDs against MongoDB `seen_items`, upserts new/returning items, and prints a JSON array of annotated items to stdout. Each item has `isNew`, `isReturning`, and `times_seen` fields. Parse the output and use it for ranking in step 4.
+
+If `MONGODB_URI` is not set, this will fail. Degrade gracefully: treat all items as new and continue.
 
 ### 3. Pull trending themes
 
-Call `mcp__mongodb__aggregate` on `signals` for the last 7 days. Compute the date string as today minus 7 days in `YYYY-MM-DD` (e.g. if today is 2026-04-09, use `2026-04-02`):
+Run via Bash:
 
-```js
-[
-  { $match: { date: { $gte: "<today minus 7 days, YYYY-MM-DD>" } } },
-  { $group: { _id: "$theme", total: { $sum: "$mentions" }, days: { $addToSet: "$date" } } },
-  { $sort: { total: -1 } },
-  { $limit: 8 }
-]
+```bash
+bun run src/brief-state.ts themes
 ```
 
-Use this as "what's been building" context in your synthesis.
+Prints a JSON array of `{ _id: "theme", total: N, days: ["2026-04-08", ...] }` for the top 8 themes over the last 7 days. Use this as "what's been building" context in your synthesis.
+
+If the result is empty (first week, or no mongo), that's fine — just skip the "Still Trending" section.
 
 ### 4. Investigate top candidates
 
@@ -109,13 +109,21 @@ git push origin HEAD
 
 ### 8. Update `signals`
 
-For each theme, insert into `signals` with `mcp__mongodb__insert-many`:
+Build a JSON array of signal documents:
 
 ```js
-{ date: "<today>", theme: "<theme>", mentions: <count of items tagged>, source_ids: [<item ids you tagged with this theme>] }
+[{ "date": "<today>", "theme": "<theme>", "mentions": <count>, "source_ids": ["id1", "id2"] }, ...]
 ```
 
 Tagging is soft: you pick which items contributed to which theme based on your own read of the content. Don't overthink it.
+
+Pipe the array to the helper via Bash:
+
+```bash
+echo '<the JSON array>' | bun run src/brief-state.ts signals
+```
+
+If `MONGODB_URI` is not set, skip this step.
 
 ### 9. On error
 

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dirkknibbe.morning-brief.action-research</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dirkknibbe/morning-brief/scripts/run-trigger.sh</string>
+        <string>triggers/action-research.md</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dirkknibbe/morning-brief</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>1</integer>
+        <key>Minute</key>
+        <integer>34</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-action-research.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-action-research.err</string>
+</dict>
+</plist>
