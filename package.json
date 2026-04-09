@@ -6,6 +6,7 @@
   "scripts": {
     "fetch": "bun run src/sources.ts",
     "reddit": "bun run src/reddit-fetch.ts",
+    "web": "bun run src/web-fetch.ts",
     "send": "bun run src/telegram.ts",
     "send:dry": "bun run src/telegram.ts --dry-run",
     "init-db": "bun run scripts/init-db.ts",

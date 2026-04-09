@@ -8,7 +8,7 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 ## Tools you will use
 
 - `Bash` — run the fetch and send CLIs, plus git commands.
-- `mcp__plugin_context-mode_context-mode__ctx_fetch_and_index` + `ctx_search` — drill into URLs that look promising for deeper context. (Prefer this over `WebFetch`, which may be blocked by the context-mode hook in this environment.)
+- `bun run web <url>` — **primary fetch path** for HN/web URLs (cleaned HTML→text, 8000-char cap, works in headless runs). `bun run reddit <url>` for Reddit.
 - `mcp__mongodb__find` / `insert-many` / `update-many` / `aggregate` — read/write state in the `morning-brief` database.
 - `Write` — create `briefs/<today>.md`.
 
@@ -56,8 +56,8 @@ Rank all items by: `score` (log-scaled) + `10 if isNew else 0` + `5 * min(times_
 
 For each, drill in:
 
-- **HN / GitHub / generic URLs** → `ctx_fetch_and_index` then `ctx_search` scoped by `source:`.
-- **Reddit URLs** → `ctx_fetch_and_index` will 403 (Reddit blocks its UA). Use `bun run reddit <url>` via Bash instead — it returns compact JSON with the post body + top 10 comments.
+- **HN / GitHub / generic URLs** → `bun run web <url>` via Bash. Pipe through `head` / `grep` to trim if the raw text is noisy.
+- **Reddit URLs** → `bun run reddit <url>` via Bash. Returns compact JSON with post body + top 10 comments.
 
 Cap total fetches at 15. Skip failures silently — do not retry.
 

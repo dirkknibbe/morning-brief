@@ -8,8 +8,9 @@ Today's date: current date in `YYYY-MM-DD`.
 ## Tools you will use
 
 - `Bash` — run the parser and send CLIs, plus git commands.
-- `WebFetch` — fetch and summarize a URL. In local sessions this may be blocked by a context-mode hook; if so, use `mcp__plugin_context-mode_context-mode__ctx_fetch_and_index` + `ctx_search` instead. In the remote trigger sandbox, `WebFetch` is the default and context-mode is unavailable.
-- `bun run reddit <url>` — for Reddit deep-dives (both `WebFetch` and `ctx_fetch_and_index` 403 on Reddit's UA).
+- `bun run web <url>` — **primary fetch path**. Returns cleaned HTML→text on stdout (truncated to 8000 chars by default; pass a second argv to change). Works in headless launchd runs where `WebFetch` and `ctx_fetch_and_index` are blocked or broken.
+- `bun run reddit <url>` — for Reddit deep-dives (Reddit 403s generic UAs; this helper uses a real one).
+- `WebFetch` — only use if `bun run web` fails and you're in an interactive session where the context-mode hook is not blocking it. Do not rely on it.
 - `Write` — create the dossier file.
 
 ## Step-by-step
@@ -34,7 +35,7 @@ For research / build-plan actions, run an iterative investigation:
 
 - Break the action into 3-6 sub-questions (e.g. "who are existing players", "what's the pricing pattern", "what's the technical minimum viable scope", "what's the distribution channel").
 - For each sub-question, fetch 1-3 relevant URLs (GitHub repos, docs, HN threads, Reddit posts). Cap total fetches at 12; **stop fetching as soon as the TL;DR writes itself** — over-fetching burns context without changing the answer.
-- For HN / web URLs → `WebFetch` with a targeted extraction prompt. In local sessions where context-mode is active, fall back to `ctx_fetch_and_index` + `ctx_search` (batch all search queries into a single call to keep context clean).
+- For HN / web URLs → `bun run web <url>` via Bash. Pipe through `head` / `grep` if you only need part of the output (e.g. `bun run web <url> | grep -A 5 pricing`).
 - For Reddit URLs → `bun run reddit <url>`.
 - For each source, note one concrete takeaway.
 
