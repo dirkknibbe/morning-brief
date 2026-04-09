@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "fetch": "bun run src/sources.ts",
-    "fetch:pretty": "bun run src/sources.ts --pretty",
+    "reddit": "bun run src/reddit-fetch.ts",
     "send": "bun run src/telegram.ts",
     "send:dry": "bun run src/telegram.ts --dry-run",
     "init-db": "bun run scripts/init-db.ts",

@@ -26,34 +26,42 @@ export async function sendToTelegram(
 
   const chunks = splitMessage(brief, 4096);
   for (const chunk of chunks) {
+    await sendChunkWithRetry(token, chatId, chunk);
+    if (chunks.length > 1) await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+async function sendChunkWithRetry(token: string, chatId: string, chunk: string): Promise<void> {
+  const body = (plain: boolean) =>
+    JSON.stringify({
+      chat_id: chatId,
+      text: chunk,
+      disable_web_page_preview: true,
+      ...(plain ? {} : { parse_mode: "Markdown" }),
+    });
+
+  let lastErr: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch(`${TG_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: chunk,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-      }),
+      body: body(false),
     });
-    if (!res.ok) {
-      const err = await res.text();
-      if (err.includes("can't parse entities")) {
-        await fetch(`${TG_API}/bot${token}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: chunk,
-            disable_web_page_preview: true,
-          }),
-        });
-      } else {
-        throw new Error(`Telegram API error: ${err}`);
-      }
+    if (res.ok) return;
+    lastErr = await res.text();
+    // Markdown parse failure → fall back to plain text once, immediately.
+    if (lastErr.includes("can't parse entities")) {
+      const plain = await fetch(`${TG_API}/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body(true),
+      });
+      if (plain.ok) return;
+      lastErr = await plain.text();
     }
-    if (chunks.length > 1) await new Promise((r) => setTimeout(r, 500));
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 750));
   }
+  throw new Error(`Telegram API error after retry: ${lastErr}`);
 }
 
 export function splitMessage(text: string, maxLen: number): string[] {

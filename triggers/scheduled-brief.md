@@ -8,7 +8,7 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 ## Tools you will use
 
 - `Bash` — run the fetch and send CLIs, plus git commands.
-- `WebFetch` — drill into URLs that look promising for deeper context.
+- `mcp__plugin_context-mode_context-mode__ctx_fetch_and_index` + `ctx_search` — drill into URLs that look promising for deeper context. (Prefer this over `WebFetch`, which may be blocked by the context-mode hook in this environment.)
 - `mcp__mongodb__find` / `insert-many` / `update-many` / `aggregate` — read/write state in the `morning-brief` database.
 - `Write` — create `briefs/<today>.md`.
 
@@ -24,7 +24,7 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 
 ### 1. Fetch raw signals
 
-Run `bun run fetch` via Bash. Parse the JSON — it contains `hn`, `reddit`, `github` arrays. Expect ~20-45 items total. If empty, send an "all sources empty" note to Telegram via `bun run send` and exit.
+Run `bun run fetch` via Bash. It writes the full payload to `data/fetch-<today>.json` and prints only a compact summary (counts + top-3 titles per source + file path) to stdout. Read the JSON file with the `Read` tool to get the full items. Expect ~20-45 items total. If all counts are zero, send an "all sources empty" note to Telegram via `bun run send` and exit.
 
 ### 2. Dedupe against `seen_items`
 
@@ -37,11 +37,11 @@ Annotate each item in-memory as `isNew` or `isReturning` (and note `times_seen` 
 
 ### 3. Pull trending themes
 
-Call `mcp__mongodb__aggregate` on `signals` for the last 7 days:
+Call `mcp__mongodb__aggregate` on `signals` for the last 7 days. Compute the date string as today minus 7 days in `YYYY-MM-DD` (e.g. if today is 2026-04-09, use `2026-04-02`):
 
 ```js
 [
-  { $match: { date: { $gte: "<7 days ago YYYY-MM-DD>" } } },
+  { $match: { date: { $gte: "<today minus 7 days, YYYY-MM-DD>" } } },
   { $group: { _id: "$theme", total: { $sum: "$mentions" }, days: { $addToSet: "$date" } } },
   { $sort: { total: -1 } },
   { $limit: 8 }
@@ -54,7 +54,12 @@ Use this as "what's been building" context in your synthesis.
 
 Rank all items by: `score` (log-scaled) + `10 if isNew else 0` + `5 * min(times_seen, 3) if isReturning`. Take the top 10.
 
-For each, call `WebFetch` on its `url` (for GH repos, fetch the README; for HN/Reddit posts, fetch the linked article or the comments URL). Cap total fetches at 15. Skip failures silently — do not retry.
+For each, drill in:
+
+- **HN / GitHub / generic URLs** → `ctx_fetch_and_index` then `ctx_search` scoped by `source:`.
+- **Reddit URLs** → `ctx_fetch_and_index` will 403 (Reddit blocks its UA). Use `bun run reddit <url>` via Bash instead — it returns compact JSON with the post body + top 10 comments.
+
+Cap total fetches at 15. Skip failures silently — do not retry.
 
 ### 5. Draft the brief
 
@@ -88,18 +93,18 @@ Prepend the header:
 
 ```
 
-Pipe the whole thing to `bun run send` via Bash. If it fails, retry once. If it still fails, write the brief to `briefs/<today>-FAILED.md` and exit with an error.
+Pipe the whole thing to `bun run send` via Bash. The sender now retries once internally on transient failures; if it still errors, write the brief to `briefs/<today>-FAILED.md` and exit with an error.
 
 ### 7. Archive to the repo
 
-Use `Write` to create `briefs/<today>.md` with the full brief (header included).
+Use `Write` to create `briefs/<today>.md` with the full brief (header included). If the file already exists (re-run on the same day), write to `briefs/<today>-rerun.md` instead so you don't clobber the earlier run.
 
 Then via Bash:
 
 ```bash
-git add briefs/<today>.md
+git add briefs/<today>*.md
 git commit -m "brief: <today>"
-git push origin main
+git push origin HEAD
 ```
 
 ### 8. Update `signals`
@@ -118,7 +123,6 @@ At any step, if something unrecoverable fails: write a short error summary (`⚠
 
 ## Environment assumed available
 
-- `ANTHROPIC_API_KEY` (implicit — you're Claude)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `MONGODB_URI`, `MONGODB_DB=morning-brief`
 - `GITHUB_TOKEN` (optional)
