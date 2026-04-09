@@ -8,10 +8,14 @@
     "fetch:pretty": "bun run src/sources.ts --pretty",
     "send": "bun run src/telegram.ts",
     "send:dry": "bun run src/telegram.ts --dry-run",
+    "init-db": "bun run scripts/init-db.ts",
     "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "mongodb": "^7.1.1"
   }
 }
