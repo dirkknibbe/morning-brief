@@ -8,8 +8,8 @@ Today's date: current date in `YYYY-MM-DD`.
 ## Tools you will use
 
 - `Bash` — run the parser and send CLIs, plus git commands.
-- `mcp__plugin_context-mode_context-mode__ctx_fetch_and_index` + `ctx_search` — fetch and query URLs.
-- `bun run reddit <url>` — for Reddit deep-dives (ctx 403s Reddit's UA).
+- `WebFetch` — fetch and summarize a URL. In local sessions this may be blocked by a context-mode hook; if so, use `mcp__plugin_context-mode_context-mode__ctx_fetch_and_index` + `ctx_search` instead. In the remote trigger sandbox, `WebFetch` is the default and context-mode is unavailable.
+- `bun run reddit <url>` — for Reddit deep-dives (both `WebFetch` and `ctx_fetch_and_index` 403 on Reddit's UA).
 - `Write` — create the dossier file.
 
 ## Step-by-step
@@ -106,6 +106,7 @@ If any step fails unrecoverably, send `⚠️ Action research failed at step N: 
 
 - **Do not build anything.** No `npm init`, no new repos, no deploys, no Vercel, no code generation beyond the dossier file.
 - **Do not contact humans.** No emails, no DMs, no GitHub issues, no PR comments on other repos.
+- **Do not use `WebFetch` on Reddit URLs** — it 403s. Always use `bun run reddit <url>` for Reddit.
 - **Do not spend money.** No paid API calls, no domain purchases, no paid plan upgrades.
 - **Cap total fetches at 12.** If you hit the cap, finish the dossier with what you have.
 - **Stop after the dossier + Telegram ping.** Do not start a second research loop on a related idea.
