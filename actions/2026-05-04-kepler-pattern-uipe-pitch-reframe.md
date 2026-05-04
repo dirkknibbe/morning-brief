@@ -1,0 +1,35 @@
+---
+date: 2026-05-04
+classification: research
+action: Read HN 47999754 (Kepler). Reframe UIPE's pitch as "deterministic UI graph, LLM for intent" — the same pattern Kepler is monetizing.
+source_brief: briefs/2026-05-04.md
+---
+
+## TL;DR
+Kepler's pitch is one sentence and one diagram: *"AI handles the language. Code handles the data. They never cross."* + a 4-layer stack (Personalization → AI Interface → Ontology → Data Platform). That maps 1:1 onto UIPE if you swap "data" for "DOM": **AI handles intent. UIPE handles perception. They never cross.** This is a sharper, more sellable framing than the current "calm tech / CDC for UI" positioning — same substance, but with a borrowed architecture diagram regulated buyers already understand. The reframe also clarifies the kernel collapse from `2026-04-25`: the 12 verbs are the L4 primitives; `scene()`/`diff()` is the L3 ontology surface; the LLM only ever speaks L2. Lead with the layered diagram, not the slogan — Kepler does, and the diagram is what's doing the selling.
+
+## Key findings
+- Kepler's stack is explicit and copyable: **L1 Personalization** (templates/memory/skills) → **L2 AI Interface** (NL → query plan, "AI interprets; code executes") → **L3 Ontology & Semantic Layer** (canonical entities, e.g. "revenue"/"top line"/"total sales" → `total_revenue`) → **L4 Data Platform** (deterministic retrieval + computation, "same input = same output, always"). The L2→L4 contract is a *structured query plan*, not raw model output. (source: kepler.ai §2 Architecture)
+- The L2 query plan is just a typed list of L4 calls — e.g. `resolve_entities(["AAPL","MSFT"])` → `fetch_metric("gross_margin", periods=4)` → `compute_comparison(...)` → `attach_citations()`. UIPE's equivalent is `resolve_target("submit")` → `get_scene()` → `compare_states(...)` → `act("click", target_id)`. The shape is identical; UIPE is *already* this, just not pitched this way. (source: kepler.ai §2)
+- Founder's HN framing (eddiehammond): *"LLM for intent, deterministic code for retrieval and computation, every number traceable to source."* The unit they sell is **traceability per output**, not per query. UIPE's analogous unit is **traceability per UI action** (scene snapshot + diff + act, all reproducible from the same recorded perception state). (source: news.ycombinator.com/item?id=47999754, top comment by eddiehammond)
+- The pattern is a wave, not a one-off. HN comment (Txmm, 11h): *"this pattern seems to be emerging everywhere... LLM as fluid coupling between deterministic parts... refine over time, codify edge cases into deterministic branches."* deepclause-sdk (markdown→Prolog DSL with execution traces) is doing the same thing in a different domain. Window for "we did this for UI" framing is open *now*, will close as it becomes default architecture. (source: HN thread + github.com/deepclause/deepclause-sdk)
+- Kepler's monetization tell: vertical-first (Kepler for Finance, live in prod, 26M SEC filings) → horizontal Platform later ("any data source, any workflow, deterministic agents inherit traceability"). UIPE's analogous play: vertical-first on one site class (e.g. enterprise SaaS QA, or accessibility audits) → horizontal MCPAASTA later. The vertical anchor is what makes the pattern legible to buyers; "perception layer for the agent web" is a horizontal pitch and dies in board meetings. (source: kepler.ai §3-§4)
+- Kepler explicitly admits **94% accuracy + HITL is the honest end state for finserv** (HN top comment HoyaSaxa, founder didn't refute). UIPE pitch should follow suit: don't promise full-autonomy, promise *verifiable* autonomy with a citation per action. "Every click traces to a scene-id and a DOM signature" is the analog of "every number traces to a 10-K page." (source: HN)
+
+## Existing players / prior art
+- **Kepler (kepler.ai)** — finserv, ex-Palantir founders, owns the "AI for intent / code for data" pitch right now. Cite, don't compete.
+- **Feldera** ("calm tech for machines", `2026-04-26` dossier) — adjacent thesis; pair with Kepler for one-two punch (philosophy + architecture).
+- **deepclause-sdk** — markdown → Prolog DSL with auto-tracked execution. Same pattern, different domain (rules engines). Worth one citation as "this is a wave."
+- **Browser-Use, Stagehand** — competitors *on the verb surface*, not the architecture. They're L2-and-L4-fused-into-one-thing. The Kepler-style 4-layer split is what UIPE has and they don't.
+- **MCP itself** — a transport layer, not an architecture. UIPE-as-MCP-server slots into L4; the L1-L3 story is what differentiates.
+
+## Concrete next steps for Dirk
+1. **Steal Kepler's diagram, swap the labels.** L1 Personalization (per-site profiles, recorded flows) → L2 Agent Interface (intent → action plan, LLM here only) → L3 Scene Ontology (canonical roles: "primary CTA"/"submit"/"login" → one node id) → L4 Perception Kernel (`scene()`, `diff()`, `act()`, deterministic). Land it at `~/uipe/docs/architecture.md` as a single-page diagram + 4 paragraphs. Reuse the kepler.ai §2 layout — same headers, UIPE-shaped content. ~30 min.
+2. **Rewrite the README hero in two lines.** Current pitch is some flavor of "perception engine for agents." New pitch: *"AI handles the intent. UIPE handles the DOM. They never cross. Every click traceable to a scene-id."* This replaces the calm-tech framing as the hero — keep calm-tech as the philosophical second paragraph.
+3. **Pick the vertical anchor before publishing.** Kepler shipped finserv first because finserv pays for traceability. UIPE's analogs: (a) accessibility audits ("every WCAG fail traces to the rendered DOM at fail-time"), (b) enterprise SaaS QA agents ("every test step traces to a scene snapshot"), (c) regulated-industry RPA ("every click defensible in a SOC2 review"). Pick **one** before rewriting the README. The horizontal Platform pitch comes later, like Kepler's §4.
+4. **Check whether the kernel reframe (`2026-04-25`) is shippable in one PR.** The reframe only sells if the API surface actually matches. If `scene()`/`diff()` aren't in `main` yet, the architecture page is fiction. Do the kernel collapse first, then publish — *not* the other way around.
+
+## Open questions
+- Is "traceability per UI action" actually a willingness-to-pay item, or is it only valued in regulated industries? Kepler bet finserv; UIPE's equivalent regulated-industry buyer is unclear (compliance? legal? accessibility-as-litigation-shield?).
+- Does Anthropic do customer-build profiles for non-finserv tools? The Kepler case study is also a distribution channel — UIPE-as-Anthropic-case-study would compress 6 months of distribution into one blog post. Worth a separate dossier on what triggers an Anthropic profile.
+- Is there a 200-word "deterministic UI graph, LLM for intent" companion post that distributes on HN? Same content, technical-blog packaging, much higher hit rate than internal positioning. (Same open question as `2026-04-26` — the answer is probably yes, and it's been "yes" for two weeks now.)
