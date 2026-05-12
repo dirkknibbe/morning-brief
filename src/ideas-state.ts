@@ -57,7 +57,7 @@ export async function applyUpsertOp(db: Db, op: UpsertOp): Promise<void> {
     { slug: op.slug },
     {
       $inc: { signal_strength: 1 },
-      $push: { sources: op.new_source as any },
+      $addToSet: { sources: op.new_source as any },
       $set: { updated_at: new Date() },
     },
   );
