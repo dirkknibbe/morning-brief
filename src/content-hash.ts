@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 export function contentHash(title: string, body: string): string {
   const normalized = (title + "\n" + body)
     .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   return createHash("sha256").update(normalized).digest("hex");
