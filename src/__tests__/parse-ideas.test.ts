@@ -78,3 +78,20 @@ test("parseIdeasFromBrief: title is truncated short summary of raw_text", () => 
   expect(result[0].title.length).toBeLessThanOrEqual(80);
   expect(result[0].title).toContain("MCP auth bridge");
 });
+
+test("parseIdeasFromBrief: extracts numbered Opportunity Sparks bullets", () => {
+  // Real briefs use both dash and numbered formats. Both must work.
+  const md = `💡 *Opportunity Sparks*
+1. *WordPress MCP safety layer* — pre-execution guard for destructive ops
+2. *Agent-spend refund API* — bookkeeping for failed agent operations
+3. *Per-tool MCP audit + insurance* — risk pricing for risky tool calls
+
+🔥 *Hot Signals*
+- something else
+`;
+  const result = parseIdeasFromBrief(md, "briefs/2026-04-08.md");
+  const sparks = result.filter((r) => r.source_section === "Opportunity Sparks");
+  expect(sparks.length).toBe(3);
+  expect(sparks[0].raw_text).toContain("WordPress MCP safety layer");
+  expect(sparks[2].raw_text).toContain("Per-tool MCP audit");
+});

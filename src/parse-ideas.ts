@@ -32,8 +32,11 @@ export function parseIdeasFromBrief(markdown: string, source_file: string): Idea
     const lines = sparks[1].split("\n");
     for (const ln of lines) {
       const trimmed = ln.trim();
-      if (!/^[-•]/.test(trimmed)) continue;
-      const text = trimmed.replace(/^[-•]\s*/, "").trim();
+      // Accept dash, bullet, or numbered list items. Briefs from different
+      // days use different conventions (- vs 1.); we don't want to silently
+      // drop one format.
+      if (!/^(?:[-•]|\d+\.)/.test(trimmed)) continue;
+      const text = trimmed.replace(/^(?:[-•]|\d+\.)\s*/, "").trim();
       if (!text) continue;
       out.push({
         title: summarize(text),
@@ -70,7 +73,7 @@ export function parseIdeasFromAction(markdown: string, source_file: string): Ide
 
   // ## Concrete next steps for Dirk — numbered list "1. ...", "2. ..."
   const steps = markdown.match(
-    /## Concrete next steps for Dirk\s*\n([\s\S]+?)(?=\n## |\n---|\n$)/i
+    /## Concrete next steps for Dirk\s*\n([\s\S]+?)(?=\n## |\n---|$)/i
   );
   if (steps) {
     // Split on newlines that start a new "N." item, then keep only numbered lines.
