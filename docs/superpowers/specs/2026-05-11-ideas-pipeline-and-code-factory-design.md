@@ -16,28 +16,33 @@ related:
 
 > The only thing that matters is finding the best ideas and building them until they work.
 
-Two non-negotiables follow:
+Three non-negotiables follow:
 
 1. **"Best ideas"** — extracted from briefs and action dossiers, then ruthlessly filtered by *recurrence and concreteness*, not first-sighting. An idea that surfaces across multiple briefs is a thesis getting stronger; an idea that appears once is noise.
-2. **"Built until they work"** — the factory iterates against explicit success criteria. Termination is **semantic** (done, stuck, or scope-break), not wall-clock or round-count.
+2. **Great ideas are often combinations.** The pipeline explicitly hunts for *cross-idea synthesis* — pairs or triples of weaker individual ideas that, combined, form a stronger thesis than any one of them alone.
+3. **"Built until they work"** — the factory iterates against explicit success criteria. Termination is **semantic** (done, stuck, or scope-break), not wall-clock or round-count.
 
 ## Pipeline overview
 
 ```
 briefs/*.md ──┐
-              ├──▶ extract ──▶ reinforce/merge ──▶ triage ──▶ ideas (Mongo: queued)
-actions/*.md ─┘                                                       │
-                                                          /build <slug> via Telegram
-                                                                      ▼
-                                                          factory (tmux RemoteTrigger)
-                                                                      │
-                                                  iterate: write → test → fix → repeat
-                                                                      │
-                                              ┌───────────────────────┼───────────────────────┐
-                                              ▼                       ▼                       ▼
-                                       ✅ done                  🛑 stuck               🛑 scope-break
-                                  push branch +              learnings.md →           reclassify idea
-                                  Telegram link              re-queue idea            (e.g., "needs paid API")
+              ├──▶ extract ──▶ reinforce/merge ──▶ synthesize ──▶ triage ──▶ ideas (Mongo: queued)
+actions/*.md ─┘                                        │                          │
+                                                       └─▶ emits new ideas        │
+                                                          with kind:'synthesis'   │
+                                                          and parents:[a,b]       │
+                                                                                  │
+                                                                  /build <slug> via Telegram
+                                                                                  ▼
+                                                                      factory (tmux RemoteTrigger)
+                                                                                  │
+                                                              iterate: write → test → fix → repeat
+                                                                                  │
+                                          ┌───────────────────────────────────────┼───────────────────────┐
+                                          ▼                                       ▼                       ▼
+                                   ✅ done                                   🛑 stuck             🛑 scope-break
+                              push branch +                              learnings.md →         reclassify idea
+                              Telegram link                              re-queue idea          (e.g., "needs paid API")
 ```
 
 ## Stages
@@ -64,9 +69,39 @@ For each candidate:
 
 This is the **"best ideas surface themselves"** mechanism. No LLM needed at this stage.
 
-### 3. Triage (`triggers/triage.md`, fires daily ~07:30)
+### 3. Synthesize (`triggers/synthesize.md`, fires daily ~07:25)
 
-Runs after `action-research`. Loads all `extracted` ideas with `signal_strength >= 2` (configurable; tunable after we see the data).
+Runs after extract/reinforce, before triage. This stage hunts for cross-idea combinations that are stronger than their constituents.
+
+**Candidate selection** — to bound the search:
+- Pool: all ideas with `status ∈ {extracted, queued, parked}` and `signal_strength >= 1`. Cross-day, not just today.
+- Cluster ideas by embedding into groups where pairwise cosine similarity is in the **mid-band** (0.55 – 0.80). Below 0.55 = unrelated (no synthesis substrate). Above 0.80 = near-duplicates (already handled by reinforce/merge). The middle band is where productive combinations live: same domain, different angles.
+- Cap candidate clusters at 10 per run. Skip clusters where every member has `status: 'rejected'` or `'needs_human'`.
+
+**Per-cluster synthesis** — the agent reads each cluster (2-4 ideas at a time) and answers:
+
+> Is there a combined idea here that is **strictly stronger** than the best individual idea in this set? If yes, write it as a new idea with a `synthesis_thesis` field explaining why the combination is greater than the sum.
+
+If yes, emit a new idea record with:
+- `kind: 'synthesis'`
+- `parents: [<slug>, <slug>, ...]` — the constituent slugs
+- `synthesis_thesis: string` — 2-3 sentences on *why* this combination is stronger than its parents. This field is load-bearing for triage; if the agent can't articulate it, the synthesis is rejected.
+- `signal_strength: max(parents.signal_strength) + 1` — combining real signals earns a bonus, but doesn't multiply (avoids over-rewarding noise).
+- `status: 'extracted'`
+- `theme_hints: union(parents.theme_hints)`
+
+If no productive synthesis, the cluster yields nothing.
+
+**Guardrails against hallucinated unicorns**:
+- The `synthesis_thesis` must reference *concrete*, *distinct* contributions from each parent. A thesis that just describes one parent and name-drops the other is rejected.
+- Synthesized ideas inherit parents' history — if all parents are `rejected`, the synthesis cannot be emitted.
+- Triage treats `kind: 'synthesis'` ideas no differently for scoring, but a synthesis whose parents are themselves stronger than the synthesis on the composite score is auto-rejected at triage. (You don't promote a worse combination over its better part.)
+
+This stage uses the subscription (RemoteTrigger), like triage. Cheap because clusters are small.
+
+### 4. Triage (`triggers/triage.md`, fires daily ~07:30)
+
+Runs after `synthesize`. Loads all `extracted` ideas with `signal_strength >= 2` (configurable; tunable after we see the data). This pool now includes synthesized ideas, which compete on equal footing with simple ones.
 
 For each surviving idea, the agent:
 1. Re-reads the source briefs/actions inline.
@@ -83,7 +118,7 @@ For each surviving idea, the agent:
 
 Sends Telegram digest: top-3 queued ideas with scores + `/build <slug>` and `/reject <slug>` callbacks.
 
-### 4. Factory (`triggers/factory.md`)
+### 5. Factory (`triggers/factory.md`)
 
 **Trigger**: fires on Telegram `/build <slug>` (not on a clock). Mechanism: listener detects the command, invokes `scripts/start-factory.sh <slug>`, which spawns a detached tmux session that runs `IDEA_SLUG=<slug> ./scripts/run-trigger.sh triggers/factory.md`. The factory trigger reads `$IDEA_SLUG` to know which idea to build.
 
@@ -117,7 +152,7 @@ Sends Telegram digest: top-3 queued ideas with scores + `/build <slug>` and `/re
 
 **No iteration cap. No wall-clock cap.** Stuck-detection is the primary terminator. We'll observe behavior and add a soft cap later if runs misbehave.
 
-### 5. Listener extensions (`triggers/listener.md`)
+### 6. Listener extensions (`triggers/listener.md`)
 
 Extend the existing Telegram listener to recognize:
 
@@ -145,9 +180,12 @@ Extend the existing Telegram listener to recognize:
     { brief: 'briefs/2026-04-09.md', section: 'Opportunity Sparks' },
     { brief: 'briefs/2026-04-12.md', section: 'One action item' },
   ],
-  signal_strength: number,       // = sources.length after dedupe
+  signal_strength: number,       // simple: sources.length; synthesis: max(parents)+1
   theme_hints: string[],         // free-text, lifted from brief themes
   status: 'extracted' | 'queued' | 'building' | 'built' | 'parked' | 'rejected' | 'needs_human',
+  kind: 'simple' | 'synthesis',
+  parents: string[] | null,      // slug refs; non-null only when kind='synthesis'
+  synthesis_thesis: string | null,  // 2-3 sentences; required when kind='synthesis', else null
   scores: { novelty: 1-5, fit: 1-5, buildable: 1-5, scope: 1-5 } | null,
   success_criteria: string[] | null,   // populated at triage
   rejection_reason: string | null,
@@ -157,6 +195,10 @@ Extend the existing Telegram listener to recognize:
   updated_at: Date,
 }
 ```
+
+**Invariants**:
+- `kind: 'synthesis'` ⇒ `parents.length >= 2` AND `synthesis_thesis !== null`.
+- A synthesis cannot be a parent of another synthesis (no recursive combination in v1 — avoids combinatorial drift).
 
 ### `factory_runs` collection
 
@@ -183,12 +225,14 @@ Single-doc collection, holds either nothing or `{ idea_slug, started_at, pid }`.
 | Path | Purpose |
 |---|---|
 | `src/extract-ideas.ts` | Scan briefs + actions, dedupe, reinforce, upsert to `ideas`. |
+| `src/cluster-ideas.ts` | Bun script — compute embeddings, return mid-band clusters for synthesis. Used by `triggers/synthesize.md`. |
 | `src/ideas-state.ts` | Mongo CRUD + CLI: `list`, `show <slug>`, `set-status <slug> <status>`, `learnings <slug>`. Mirrors `brief-state.ts` shape. |
 | `src/factory-lock.ts` | Acquire/release/check the lock doc. |
+| `triggers/synthesize.md` | Daily 07:25 trigger — propose synthesized ideas from clusters. |
 | `triggers/triage.md` | Daily 07:30 trigger — score, criteria, queue. |
 | `triggers/factory.md` | Telegram-fired trigger — the build loop itself. |
 | `triggers/listener.md` | Extended with new commands (existing file, edit). |
-| `scripts/loop-triggers.sh` | Existing — extend to fire `triage.md` after `action-research.md`. |
+| `scripts/loop-triggers.sh` | Existing — extend to fire `synthesize.md` then `triage.md` after `action-research.md`. |
 | `scripts/start-factory.sh` | New — used by listener to spawn factory tmux session on `/build`. |
 
 ## Hard guardrails
@@ -209,12 +253,14 @@ These are deliberately not pre-tuned — observe first, set later:
 - The `5-round` stuck-detection window.
 - Whether to add a soft iteration cap (currently: none).
 - Whether triage should produce success criteria itself or hand that to a separate "criteria-writer" pass.
+- The synthesize mid-band cosine thresholds (0.55-0.80). Likely need adjusting once we see real ideas cluster.
+- Whether synthesized ideas should be allowed to themselves be synthesized in v2 (currently forbidden).
 
 ## Recommended phasing
 
 The implementation plan should ship in two phases:
 
-**Phase 1 — Ideas surface themselves.** `extract-ideas.ts`, `ideas-state.ts`, `triggers/triage.md`, listener commands `/ideas`, `/idea`, `/reject`. Add `triage.md` to `loop-triggers.sh`. Run for ~1 week. We'll see what real ideas look like, validate the dedupe/reinforce mechanism, and tune `signal_strength` threshold from observation before committing factory mechanics to the design.
+**Phase 1 — Ideas surface themselves.** `extract-ideas.ts`, `cluster-ideas.ts`, `ideas-state.ts`, `triggers/synthesize.md`, `triggers/triage.md`, listener commands `/ideas`, `/idea`, `/reject`. Add `synthesize.md` and `triage.md` to `loop-triggers.sh`. Run for ~1 week. We'll see what real ideas look like, validate the dedupe/reinforce/synthesis mechanism, and tune thresholds from observation before committing factory mechanics to the design.
 
 **Phase 2 — The factory.** `factory-lock.ts`, `triggers/factory.md`, `scripts/start-factory.sh`, listener commands `/build`, `/abort`, `/factory-status`. Driven by what we learn in Phase 1 (e.g., what success-criteria patterns the triage agent actually produces, whether queued ideas tend to be coherent enough to build).
 
@@ -224,6 +270,6 @@ This phasing is also a hedge: if Phase 1 reveals that briefs don't yield buildab
 
 - Auto-PR creation.
 - Deploy steps.
-- Cross-idea synthesis ("idea A and idea B share a substrate").
+- Recursive synthesis (a synthesis becoming a parent of another synthesis).
 - Web UI for browsing ideas — Telegram + git is enough.
 - Multi-machine factory orchestration.
