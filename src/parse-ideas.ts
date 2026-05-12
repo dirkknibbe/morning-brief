@@ -14,7 +14,13 @@ export interface IdeaCandidate {
 }
 
 function summarize(text: string, maxLen = 80): string {
-  const firstClause = text.split(/[.—–-]/)[0].trim();
+  // Strip markdown emphasis markers (*, **, _, __) so they don't leak into titles.
+  const stripped = text.replace(/[*_]+/g, "").trim();
+  // Prefer the em-dash/en-dash as the title/description boundary (common in briefs).
+  // Fall back to a period followed by a space. Don't split on bare hyphens —
+  // they appear inside compound words like "Agent-spend" and dot-versions like "1.x".
+  const split = stripped.split(/[—–]|\.\s/);
+  const firstClause = split[0].trim();
   return firstClause.length <= maxLen ? firstClause : firstClause.slice(0, maxLen).trim();
 }
 

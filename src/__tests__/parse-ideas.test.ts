@@ -95,3 +95,17 @@ test("parseIdeasFromBrief: extracts numbered Opportunity Sparks bullets", () => 
   expect(sparks[0].raw_text).toContain("WordPress MCP safety layer");
   expect(sparks[2].raw_text).toContain("Per-tool MCP audit");
 });
+
+test("parseIdeasFromBrief: title strips markdown emphasis and survives compound-word hyphens", () => {
+  const md = `💡 *Opportunity Sparks*
+1. *Agent-spend refund API* — bookkeeping for failed agent operations
+2. *MCP 1.x audit harness* — re-run old MCP server snapshots
+`;
+  const result = parseIdeasFromBrief(md, "briefs/x.md");
+  const sparks = result.filter((r) => r.source_section === "Opportunity Sparks");
+  expect(sparks.length).toBe(2);
+  // No asterisk in the title; full compound word preserved.
+  expect(sparks[0].title).toBe("Agent-spend refund API");
+  // Dot inside "1.x" must not split mid-version.
+  expect(sparks[1].title).toBe("MCP 1.x audit harness");
+});
