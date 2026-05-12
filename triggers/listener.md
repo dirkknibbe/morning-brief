@@ -27,6 +27,22 @@ Only respond to messages from Dirk's chat (the same `TELEGRAM_CHAT_ID` the sched
 
 **Anything else** — Do your best with the tools above. Keep replies under 300 words. If you need to clarify, ask a single short follow-up question.
 
+## Ideas pipeline commands
+
+Dirk uses these to inspect and manage the ideas queue produced by `bun run extract-ideas`. Use Bash to invoke the helper, parse the JSON, and reply in Telegram-friendly format.
+
+- `/ideas` (or just `ideas`) — Run `bun run ideas list` via Bash. Parse the JSON, then reply with the top 10 by `signal_strength` formatted as:
+  ```
+  *Ideas Queue*
+  • `<slug>` — <title> (sig:<n>, <status>)
+    sources: <count> briefs/actions
+  ```
+  Mention any with `status: queued` at the top of the reply.
+- `/idea <slug>` (or `idea <slug>`) — Run `bun run ideas show <slug>`. Reply with: title, slug, signal_strength, status, sources list, success_criteria if non-null, prior_art twist if non-null, learnings if non-empty. Keep the message under 1500 chars; if the idea record is large, summarize the long fields rather than dumping them.
+- `/reject <slug> [reason]` (or `reject <slug> [reason]`) — Run `bun run ideas set-status <slug> rejected "<reason>"`. Confirm with `✓ rejected <slug>` plus the reason on the next line. If the slug is unknown the CLI exits non-zero — relay that failure to Dirk.
+
+If a slug looks ambiguous or missing, ask Dirk to clarify rather than guessing. Never invent a slug.
+
 ## Rules
 
 - Keep replies conversational but substantive. Dirk is on mobile reading this.
