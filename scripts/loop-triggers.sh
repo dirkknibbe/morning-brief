@@ -1,9 +1,9 @@
 #!/bin/bash
-# loop-triggers.sh — daily driver for morning-brief and action-research.
+# loop-triggers.sh — daily driver for morning-brief, action-research, and ideas extraction.
 #
 # Designed to run inside tmux on a machine that stays on. Fires the
-# brief at 06:30 local, then action-research at 07:00 local, then
-# sleeps until the next day.
+# brief at 06:30 local, then action-research at 07:00 local, then runs
+# the (cheap, non-LLM) extract-ideas pass, then sleeps until the next day.
 #
 # Usage:
 #   tmux new -d -s morning-brief 'cd ~/morning-brief && ./scripts/loop-triggers.sh'
@@ -70,6 +70,13 @@ while true; do
   action_at=$(future_epoch "$ACTION_HOUR" "$ACTION_MIN")
   sleep_until "$action_at" "action-research"
   fire "triggers/action-research.md" "action-research"
+
+  log "running extract-ideas"
+  if bun run extract-ideas; then
+    log "extract-ideas ok"
+  else
+    log "extract-ideas failed (rc=$?) — continuing"
+  fi
 
   log "cycle complete, looping"
 done
