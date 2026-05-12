@@ -26,7 +26,7 @@ try {
 
   // Ensure collections exist (createCollection is idempotent if we catch
   // the "already exists" error).
-  const collections = ["seen_items", "signals", "preferences"];
+  const collections = ["seen_items", "signals", "preferences", "ideas"];
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(
       (c) => c.name
@@ -53,6 +53,13 @@ try {
     .collection("preferences")
     .createIndex({ theme: 1 }, { unique: true });
   console.log("✓ preferences index");
+
+  await db.collection("ideas").createIndex({ slug: 1 }, { unique: true });
+  await db.collection("ideas").createIndex({ content_hash: 1 });
+  await db.collection("ideas").createIndex({ status: 1 });
+  await db.collection("ideas").createIndex({ signal_strength: -1 });
+  await db.collection("ideas").createIndex({ created_at: -1 });
+  console.log("✓ ideas indexes");
 
   console.log(`\nDone. Database: ${dbName}`);
 } catch (err) {
