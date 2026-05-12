@@ -74,7 +74,7 @@ This is the **"best ideas surface themselves"** mechanism. No LLM needed at this
 Runs after extract/reinforce, before triage. This stage hunts for cross-idea combinations that are stronger than their constituents.
 
 **Candidate selection** — to bound the search:
-- Pool: all ideas with `status ∈ {extracted, queued, parked}` and `signal_strength >= 1`. Cross-day, not just today.
+- Pool: all ideas with `status ∈ {extracted, queued, parked}` and `signal_strength >= 1` and `synthesis_depth <= 1` (depth-2 syntheses are leaves for synthesis purposes; they can't be parents). Cross-day, not just today.
 - Cluster ideas by embedding into groups where pairwise cosine similarity is in the **mid-band** (0.55 – 0.80). Below 0.55 = unrelated (no synthesis substrate). Above 0.80 = near-duplicates (already handled by reinforce/merge). The middle band is where productive combinations live: same domain, different angles.
 - Cap candidate clusters at 10 per run. Skip clusters where every member has `status: 'rejected'` or `'needs_human'`.
 
@@ -84,8 +84,9 @@ Runs after extract/reinforce, before triage. This stage hunts for cross-idea com
 
 If yes, emit a new idea record with:
 - `kind: 'synthesis'`
-- `parents: [<slug>, <slug>, ...]` — the constituent slugs
+- `parents: [<slug>, <slug>, ...]` — the constituent slugs (2-4 parents per cluster).
 - `synthesis_thesis: string` — 2-3 sentences on *why* this combination is stronger than its parents. This field is load-bearing for triage; if the agent can't articulate it, the synthesis is rejected.
+- `synthesis_depth: 1 + max(parents.synthesis_depth)` — depth-2 syntheses are allowed (combining a synthesis with simples, or two syntheses). Capped at 2.
 - `signal_strength: max(parents.signal_strength) + 1` — combining real signals earns a bonus, but doesn't multiply (avoids over-rewarding noise).
 - `status: 'extracted'`
 - `theme_hints: union(parents.theme_hints)`
@@ -105,18 +106,24 @@ Runs after `synthesize`. Loads all `extracted` ideas with `signal_strength >= 2`
 
 For each surviving idea, the agent:
 1. Re-reads the source briefs/actions inline.
-2. Writes **explicit success criteria** as a list of testable assertions, e.g.:
+2. **Prior-art scan** (web research). Runs 2-4 targeted fetches per candidate via `bun run web` and `bun run reddit` (the same helpers `action-research` uses) to check:
+   - Who's already building this? GitHub repos, HN threads, Reddit posts.
+   - What's the existing pricing/distribution pattern?
+   - **Is there a useful twist Dirk could add?** Articulate it in one sentence if so.
+   
+   Cap: 4 fetches per candidate, 20 fetches per triage run total — same discipline as `action-research`. Results captured in a `prior_art` field on the idea (URLs + one-line takeaways + the twist hypothesis).
+3. Writes **explicit success criteria** as a list of testable assertions, e.g.:
    ```
    success_criteria:
      - "CLI accepts a GitHub repo URL"
      - "outputs a JSON file with {summary, files_touched, risk_score}"
      - "passes smoke test against anthropics/claude-code repo"
    ```
-   *Without these, the build loop has no termination signal. This step is non-skippable.*
-3. Scores 1-5 across: **novelty**, **fits-Dirk-profile**, **buildable-without-paid-APIs**, **scope** (favors prototype-in-a-day). Composite = sum.
-4. Marks top idea `queued`. Tie-breaker order: highest `signal_strength`, then most recent `extracted_at`. Others stay `extracted` for next-day re-evaluation (recurrence will boost them naturally).
+   The criteria should encode *the twist* — if prior art reveals 10 people already shipped the obvious version, the criteria target the differentiator, not the commodity. *Without criteria, the build loop has no termination signal. This step is non-skippable.*
+4. Scores 1-5 across: **novelty** (informed by the prior-art scan — if 5 GitHub repos already do this, novelty is 1; if the twist is genuinely unaddressed, novelty is 5), **fits-Dirk-profile**, **buildable-without-paid-APIs**, **scope** (favors prototype-in-a-day). Composite = sum.
+5. Marks top idea `queued`. Tie-breaker order: highest `signal_strength`, then most recent `extracted_at`. Others stay `extracted` for next-day re-evaluation (recurrence will boost them naturally).
 
-Sends Telegram digest: top-3 queued ideas with scores + `/build <slug>` and `/reject <slug>` callbacks.
+Sends Telegram digest: top-3 queued ideas with scores **+ one-line twist** + `/build <slug>` and `/reject <slug>` callbacks.
 
 ### 5. Factory (`triggers/factory.md`)
 
@@ -159,7 +166,7 @@ Extend the existing Telegram listener to recognize:
 | Command | Action |
 |---|---|
 | `/ideas` | List top-10 `queued` and `extracted` ideas with scores. |
-| `/idea <slug>` | Show full record: title, sources, signal_strength, success_criteria, learnings. |
+| `/idea <slug>` | Show full record: title, sources, signal_strength, prior_art (twist + URLs), success_criteria, learnings. |
 | `/build <slug>` | Fire the factory RemoteTrigger for that slug. Refuse if lock held. |
 | `/reject <slug> <reason>` | Mark idea `rejected`, store reason. Excluded from future triage. |
 | `/abort <slug>` | Kill the running factory tmux session, release lock, leave worktree intact. |
@@ -186,6 +193,11 @@ Extend the existing Telegram listener to recognize:
   kind: 'simple' | 'synthesis',
   parents: string[] | null,      // slug refs; non-null only when kind='synthesis'
   synthesis_thesis: string | null,  // 2-3 sentences; required when kind='synthesis', else null
+  synthesis_depth: number,       // 0 for simple; 1 for synthesis of simples; 2 for synthesis of syntheses
+  prior_art: {
+    twist: string,               // one-line: what's the differentiator
+    sources: [{ url: string, takeaway: string }],
+  } | null,                      // populated at triage
   scores: { novelty: 1-5, fit: 1-5, buildable: 1-5, scope: 1-5 } | null,
   success_criteria: string[] | null,   // populated at triage
   rejection_reason: string | null,
@@ -197,8 +209,9 @@ Extend the existing Telegram listener to recognize:
 ```
 
 **Invariants**:
-- `kind: 'synthesis'` ⇒ `parents.length >= 2` AND `synthesis_thesis !== null`.
-- A synthesis cannot be a parent of another synthesis (no recursive combination in v1 — avoids combinatorial drift).
+- `kind: 'synthesis'` ⇒ `parents.length >= 2` AND `synthesis_thesis !== null` AND `synthesis_depth >= 1`.
+- `synthesis_depth = 1 + max(parents.synthesis_depth)`. Hard cap at **2** — a synthesis with depth 2 (synthesis-of-syntheses) cannot itself become a parent. This bounds combinatorial drift while still allowing one productive level of recursion.
+- A recursive synthesis (depth 2) must defend in its thesis why the combination is stronger than *every* parent, including its synthesized parents — not just the leaf-level constituents. If the thesis only references original leaves and treats the synthesized parent as a transparent bundle, the recursion is rejected.
 
 ### `factory_runs` collection
 
@@ -254,7 +267,8 @@ These are deliberately not pre-tuned — observe first, set later:
 - Whether to add a soft iteration cap (currently: none).
 - Whether triage should produce success criteria itself or hand that to a separate "criteria-writer" pass.
 - The synthesize mid-band cosine thresholds (0.55-0.80). Likely need adjusting once we see real ideas cluster.
-- Whether synthesized ideas should be allowed to themselves be synthesized in v2 (currently forbidden).
+- The triage prior-art fetch cap (4 per candidate, 20 per run) — may need to grow or shrink depending on how many candidates survive `signal_strength >= 2`.
+- Whether the prior-art twist hypothesis should feed directly into success_criteria (currently: yes, implicitly) or be a separately-tracked field that the triage agent reconciles.
 
 ## Recommended phasing
 
@@ -270,6 +284,6 @@ This phasing is also a hedge: if Phase 1 reveals that briefs don't yield buildab
 
 - Auto-PR creation.
 - Deploy steps.
-- Recursive synthesis (a synthesis becoming a parent of another synthesis).
-- Web UI for browsing ideas — Telegram + git is enough.
+- Synthesis recursion deeper than 2 levels.
+- Dashboard / web UI for viewing the ideas database — Telegram + git suffice. (Note: this is a UI deferral, not a research deferral — web research *is* in scope, inside the triage prior-art scan.)
 - Multi-machine factory orchestration.
