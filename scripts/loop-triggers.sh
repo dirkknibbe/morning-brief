@@ -5,10 +5,19 @@
 # brief at 06:30 local, then action-research at 07:00 local, then runs
 # the (cheap, non-LLM) extract-ideas pass, then sleeps until the next day.
 #
-# Each step gates on system_state: brief and action-research check the
-# `frozen` master flag; extract-ideas checks both `frozen` and the per-stage
-# `extract_enabled` flag. To pause everything: `bun run system-state freeze`.
+# Each step gates on system_state. The gating asymmetry is intentional:
+#   - brief and action-research are pre-existing pipelines that predate the
+#     Stage enum (`extract`, `synthesize`, `triage`, `factory`). They have no
+#     `<stage>_enabled` flag of their own, so they only honor the global
+#     `frozen` master flag via `system-state not-frozen`.
+#   - extract-ideas is a new ideas-pipeline stage. It honors both `frozen`
+#     and the per-stage `extract_enabled` flag via `system-state check extract`.
+#
+# To pause everything (including brief and action-research): `bun run system-state freeze`.
 # To pause just extraction: `bun run system-state disable extract`.
+# To pause individual brief or action-research, you'd need to add new
+# `brief_enabled` / `action_research_enabled` flags to system_state — out
+# of scope for v1.
 #
 # Usage:
 #   tmux new -d -s morning-brief 'cd ~/morning-brief && ./scripts/loop-triggers.sh'
