@@ -74,9 +74,20 @@ export async function isFrozen(db: Db): Promise<boolean> {
   return (await getState(db)).frozen;
 }
 
+/**
+ * isEnabled checks ONLY the per-stage `<stage>_enabled` flag — it does NOT
+ * consult the master `frozen` flag. Callers that need "may this stage run
+ * right now" should check `isFrozen` AND `isEnabled` separately, OR call
+ * `canRun(getState(db), stage)` for the combined check.
+ */
 export async function isEnabled(db: Db, stage: Stage): Promise<boolean> {
   const state = await getState(db);
-  return canRun(state, stage);
+  switch (stage) {
+    case "extract":    return state.extract_enabled;
+    case "synthesize": return state.synthesize_enabled;
+    case "triage":     return state.triage_enabled;
+    case "factory":    return state.factory_enabled;
+  }
 }
 
 export async function setFrozen(
@@ -123,49 +134,61 @@ if (import.meta.main) {
   if (!uri) {
     console.error("system-state: MONGODB_URI is not set");
     process.exit(1);
-  }
-  const dbName = process.env.MONGODB_DB ?? "morning-brief";
-  const mode = process.argv[2];
-  const client = new MongoClient(uri);
+  } else {
+    await (async () => {
+      const dbName = process.env.MONGODB_DB ?? "morning-brief";
+      const mode = process.argv[2];
+      const client = new MongoClient(uri);
+      const exitClean = async (code: number) => {
+        await client.close();
+        process.exit(code);
+      };
 
-  try {
-    await client.connect();
-    const db = client.db(dbName);
+      try {
+        await client.connect();
+        const db = client.db(dbName);
 
-    if (mode === "status") {
-      const state = await getState(db);
-      console.log(JSON.stringify(state, null, 2));
-    } else if (mode === "check") {
-      const stage = process.argv[3];
-      if (!stage || !isStage(stage)) {
-        console.error(`usage: system-state check <stage>  (one of: ${STAGES.join(", ")})`);
-        process.exit(1);
+        if (mode === "status") {
+          const state = await getState(db);
+          console.log(JSON.stringify(state, null, 2));
+        } else if (mode === "check") {
+          const stage = process.argv[3];
+          if (!stage || !isStage(stage)) {
+            console.error(`usage: system-state check <stage>  (one of: ${STAGES.join(", ")})`);
+            await exitClean(1);
+            return;
+          }
+          const state = await getState(db);
+          await exitClean(canRun(state, stage) ? 0 : 1);
+          return;
+        } else if (mode === "freeze") {
+          const reason = process.argv[3] ?? null;
+          await setFrozen(db, true, reason, "user-cli");
+          console.log(`🚨 system frozen${reason ? ` (${reason})` : ""}`);
+        } else if (mode === "unfreeze") {
+          await setFrozen(db, false, null, "user-cli");
+          console.log("✓ system unfrozen");
+        } else if (mode === "enable" || mode === "disable") {
+          const stage = process.argv[3];
+          if (!stage || !isStage(stage)) {
+            console.error(`usage: system-state ${mode} <stage>  (one of: ${STAGES.join(", ")})`);
+            await exitClean(1);
+            return;
+          }
+          await setEnabled(db, stage, mode === "enable", "user-cli");
+          console.log(`✓ ${stage} ${mode === "enable" ? "enabled" : "disabled"}`);
+        } else {
+          console.error("usage: system-state <status|check|freeze|unfreeze|enable|disable> [args]");
+          await exitClean(1);
+          return;
+        }
+      } catch (e) {
+        console.error("system-state failed:", (e as Error).message);
+        await exitClean(1);
+        return;
+      } finally {
+        await client.close();
       }
-      const state = await getState(db);
-      process.exit(canRun(state, stage) ? 0 : 1);
-    } else if (mode === "freeze") {
-      const reason = process.argv[3] ?? null;
-      await setFrozen(db, true, reason, "user-cli");
-      console.log(`🚨 system frozen${reason ? ` (${reason})` : ""}`);
-    } else if (mode === "unfreeze") {
-      await setFrozen(db, false, null, "user-cli");
-      console.log("✓ system unfrozen");
-    } else if (mode === "enable" || mode === "disable") {
-      const stage = process.argv[3];
-      if (!stage || !isStage(stage)) {
-        console.error(`usage: system-state ${mode} <stage>  (one of: ${STAGES.join(", ")})`);
-        process.exit(1);
-      }
-      await setEnabled(db, stage, mode === "enable", "user-cli");
-      console.log(`✓ ${stage} ${mode === "enable" ? "enabled" : "disabled"}`);
-    } else {
-      console.error("usage: system-state <status|check|freeze|unfreeze|enable|disable> [args]");
-      process.exit(1);
-    }
-  } catch (e) {
-    console.error("system-state failed:", (e as Error).message);
-    process.exit(1);
-  } finally {
-    await client.close();
+    })();
   }
 }
