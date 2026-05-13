@@ -7,14 +7,18 @@
  * CLI modes:
  *   list [status]               — print top-50 ideas (optionally filtered)
  *   show <slug>                 — print one idea as JSON
- *   set-status <slug> <status> [reason]
+ *   set-status <slug> <status> [reason]   (actor recorded as "user-cli")
  *
  * Library exports for extract-ideas.ts:
  *   findIdeaByHash(db, hash) → ExistingIdea | null
- *   applyUpsertOp(db, op)
+ *   applyUpsertOp(db, op, actor)
  *   listIdeas(db, { status?, limit? })
  *   getIdea(db, slug)
- *   setStatus(db, slug, status, reason?)
+ *   setStatus(db, slug, newStatus, actor, reason?)
+ *
+ * Status transitions are enforced via status.ts ALLOWED_TRANSITIONS.
+ * Every transition (insert and update) writes a best-effort audit_log row
+ * via audit.ts — failures are logged but do not propagate.
  */
 
 import { MongoClient, type Db } from "mongodb";
@@ -36,12 +40,25 @@ export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea
 export async function applyUpsertOp(db: Db, op: UpsertOp, actor: string): Promise<void> {
   if (op.kind === "skip") return;
   if (op.kind === "insert") {
+    let inserted = false;
     try {
       await db.collection("ideas").insertOne(op.doc as any);
-      await recordTransition(db, op.doc.slug, null, "extracted", actor);
+      inserted = true;
     } catch (e: any) {
       // Duplicate key (race against a concurrent insert) — fall through.
       if (e.code !== 11000) throw e;
+    }
+    if (inserted) {
+      // Audit is best-effort observability; a failed insertOne to audit_log
+      // must NOT propagate as a caller-visible error after the idea insert
+      // already committed, and must NOT block retry (a re-run on the same
+      // input would hit code-11000 in the idea insert and skip — which would
+      // also skip the audit row if it were tied to the idea-insert try).
+      try {
+        await recordTransition(db, op.doc.slug, null, "extracted", actor);
+      } catch (e) {
+        console.error(`audit: recordTransition failed for ${op.doc.slug}:`, (e as Error).message);
+      }
     }
     return;
   }
@@ -99,7 +116,13 @@ export async function setStatus(
   if (reason) set.rejection_reason = reason;
   await db.collection("ideas").updateOne({ slug }, { $set: set });
 
-  await recordTransition(db, slug, existing.status, newStatus, actor, reason);
+  // Audit is best-effort; the status change already committed above. A failed
+  // audit insertOne must not propagate as a caller-visible error.
+  try {
+    await recordTransition(db, slug, existing.status, newStatus, actor, reason);
+  } catch (e) {
+    console.error(`audit: recordTransition failed for ${slug}:`, (e as Error).message);
+  }
 }
 
 // CLI
