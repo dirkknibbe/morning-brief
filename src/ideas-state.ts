@@ -19,7 +19,7 @@
 
 import { MongoClient, type Db } from "mongodb";
 import type { ExistingIdea, UpsertOp } from "./dedupe-ideas";
-import { type Status, isValidStatus, assertValidTransition } from "./status";
+import { isValidStatus, assertValidTransition } from "./status";
 
 export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea | null> {
   const doc = await db.collection("ideas").findOne({ content_hash: hash });
