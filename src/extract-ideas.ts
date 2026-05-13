@@ -17,6 +17,7 @@ import { parseIdeasFromBrief, parseIdeasFromAction, type IdeaCandidate } from ".
 import { contentHash } from "./content-hash";
 import { decideUpsertOp } from "./dedupe-ideas";
 import { findIdeaByHash, applyUpsertOp } from "./ideas-state";
+import { isFrozen, isEnabled } from "./system-state";
 
 function readDirMarkdown(dir: string): { path: string; body: string }[] {
   if (!existsSync(dir)) return [];
@@ -66,6 +67,17 @@ const client = new MongoClient(uri!);
 try {
   await client.connect();
   const db = client.db(dbName);
+
+  if (await isFrozen(db)) {
+    console.log("extract-ideas: skipping (system frozen)");
+    await client.close();
+    process.exit(0);
+  }
+  if (!(await isEnabled(db, "extract"))) {
+    console.log("extract-ideas: skipping (extract disabled)");
+    await client.close();
+    process.exit(0);
+  }
 
   for (const c of candidates) {
     const hash = contentHash(c.title, c.raw_text);
