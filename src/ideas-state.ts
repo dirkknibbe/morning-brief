@@ -20,6 +20,7 @@
 import { MongoClient, type Db } from "mongodb";
 import type { ExistingIdea, UpsertOp } from "./dedupe-ideas";
 import { isValidStatus, assertValidTransition } from "./status";
+import { recordTransition } from "./audit";
 
 export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea | null> {
   const doc = await db.collection("ideas").findOne({ content_hash: hash });
@@ -32,18 +33,19 @@ export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea
   };
 }
 
-export async function applyUpsertOp(db: Db, op: UpsertOp): Promise<void> {
+export async function applyUpsertOp(db: Db, op: UpsertOp, actor: string): Promise<void> {
   if (op.kind === "skip") return;
   if (op.kind === "insert") {
     try {
       await db.collection("ideas").insertOne(op.doc as any);
+      await recordTransition(db, op.doc.slug, null, "extracted", actor);
     } catch (e: any) {
       // Duplicate key (race against a concurrent insert) — fall through.
       if (e.code !== 11000) throw e;
     }
     return;
   }
-  // reinforce
+  // reinforce — no audit row (idempotent re-observation, not a transition)
   await db.collection("ideas").updateOne(
     { slug: op.slug },
     {
@@ -76,6 +78,7 @@ export async function setStatus(
   db: Db,
   slug: string,
   newStatus: string,
+  actor: string,
   reason?: string,
 ): Promise<void> {
   if (!isValidStatus(newStatus)) {
@@ -95,6 +98,8 @@ export async function setStatus(
   const set: Record<string, unknown> = { status: newStatus, updated_at: new Date() };
   if (reason) set.rejection_reason = reason;
   await db.collection("ideas").updateOne({ slug }, { $set: set });
+
+  await recordTransition(db, slug, existing.status, newStatus, actor, reason);
 }
 
 // CLI
@@ -130,7 +135,7 @@ if (import.meta.main) {
         console.error("usage: ideas-state set-status <slug> <status> [reason]");
         process.exit(1);
       }
-      await setStatus(db, slug, status, reason);
+      await setStatus(db, slug, status, "user-cli", reason);
       console.log(`✓ ${slug} → ${status}${reason ? ` (${reason})` : ""}`);
     } else {
       console.error("usage: ideas-state <list|show|set-status> [args]");

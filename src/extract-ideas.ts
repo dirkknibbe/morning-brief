@@ -74,7 +74,7 @@ try {
     if (op.kind === "insert") summary.inserted++;
     else if (op.kind === "reinforce") summary.reinforced++;
     else summary.skipped++;
-    await applyUpsertOp(db, op);
+    await applyUpsertOp(db, op, "extract-ideas");
   }
   console.log(JSON.stringify(summary, null, 2));
 } finally {
