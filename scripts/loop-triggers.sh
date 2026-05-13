@@ -5,6 +5,11 @@
 # brief at 06:30 local, then action-research at 07:00 local, then runs
 # the (cheap, non-LLM) extract-ideas pass, then sleeps until the next day.
 #
+# Each step gates on system_state: brief and action-research check the
+# `frozen` master flag; extract-ideas checks both `frozen` and the per-stage
+# `extract_enabled` flag. To pause everything: `bun run system-state freeze`.
+# To pause just extraction: `bun run system-state disable extract`.
+#
 # Usage:
 #   tmux new -d -s morning-brief 'cd ~/morning-brief && ./scripts/loop-triggers.sh'
 #   tmux attach -t morning-brief   # to watch
@@ -65,17 +70,29 @@ log "loop-triggers started (brief $(printf '%02d:%02d' $BRIEF_HOUR $BRIEF_MIN), 
 while true; do
   brief_at=$(future_epoch "$BRIEF_HOUR" "$BRIEF_MIN")
   sleep_until "$brief_at" "brief"
-  fire "triggers/scheduled-brief.md" "brief"
+  if bun run system-state not-frozen 2>/dev/null; then
+    fire "triggers/scheduled-brief.md" "brief"
+  else
+    log "skipping brief: system frozen (or unreachable)"
+  fi
 
   action_at=$(future_epoch "$ACTION_HOUR" "$ACTION_MIN")
   sleep_until "$action_at" "action-research"
-  fire "triggers/action-research.md" "action-research"
-
-  log "running extract-ideas"
-  if bun run extract-ideas; then
-    log "extract-ideas ok"
+  if bun run system-state not-frozen 2>/dev/null; then
+    fire "triggers/action-research.md" "action-research"
   else
-    log "extract-ideas failed (rc=$?) — continuing"
+    log "skipping action-research: system frozen (or unreachable)"
+  fi
+
+  if bun run system-state check extract 2>/dev/null; then
+    log "running extract-ideas"
+    if bun run extract-ideas; then
+      log "extract-ideas ok"
+    else
+      log "extract-ideas failed (rc=$?) — continuing"
+    fi
+  else
+    log "skipping extract-ideas: frozen or disabled (or unreachable)"
   fi
 
   log "cycle complete, looping"

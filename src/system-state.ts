@@ -14,6 +14,7 @@
  * CLI:
  *   status                        — print current state as JSON
  *   check <stage>                 — exit 0 if stage may run, 1 otherwise (for shell gates)
+ *   not-frozen                    — exit 0 if system is not frozen, 1 otherwise (for shell gates)
  *   freeze [reason]               — set frozen=true
  *   unfreeze                      — set frozen=false
  *   enable  <stage>               — set <stage>_enabled=true
@@ -161,6 +162,10 @@ if (import.meta.main) {
           const state = await getState(db);
           await exitClean(canRun(state, stage) ? 0 : 1);
           return;
+        } else if (mode === "not-frozen") {
+          const state = await getState(db);
+          const ok = !state.frozen;
+          await exitClean(ok ? 0 : 1);
         } else if (mode === "freeze") {
           const reason = process.argv[3] ?? null;
           await setFrozen(db, true, reason, "user-cli");
@@ -178,7 +183,7 @@ if (import.meta.main) {
           await setEnabled(db, stage, mode === "enable", "user-cli");
           console.log(`✓ ${stage} ${mode === "enable" ? "enabled" : "disabled"}`);
         } else {
-          console.error("usage: system-state <status|check|freeze|unfreeze|enable|disable> [args]");
+          console.error("usage: system-state <status|check|not-frozen|freeze|unfreeze|enable|disable> [args]");
           await exitClean(1);
           return;
         }
