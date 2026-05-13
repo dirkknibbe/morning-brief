@@ -11,6 +11,7 @@
     "send:dry": "bun run src/telegram.ts --dry-run",
     "extract-ideas": "bun run src/extract-ideas.ts",
     "ideas": "bun run src/ideas-state.ts",
+    "system-state": "bun run src/system-state.ts",
     "init-db": "bun run scripts/init-db.ts",
     "test": "bun test"
   },

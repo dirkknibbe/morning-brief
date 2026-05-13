@@ -26,7 +26,7 @@ try {
 
   // Ensure collections exist (createCollection is idempotent if we catch
   // the "already exists" error).
-  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log"];
+  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state"];
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(
       (c) => c.name
@@ -65,6 +65,24 @@ try {
   await db.collection("audit_log").createIndex({ slug: 1, ts: -1 });
   await db.collection("audit_log").createIndex({ ts: -1 });
   console.log("✓ audit_log indexes");
+
+  const stateExisting = await db.collection("system_state").findOne({ _id: "singleton" as any });
+  if (!stateExisting) {
+    await db.collection("system_state").insertOne({
+      _id: "singleton" as any,
+      frozen: false,
+      extract_enabled: true,
+      synthesize_enabled: true,
+      triage_enabled: true,
+      factory_enabled: true,
+      freeze_reason: null,
+      updated_at: new Date(),
+      updated_by: "init-db",
+    });
+    console.log("✓ system_state singleton seeded");
+  } else {
+    console.log("· system_state singleton already exists");
+  }
 
   console.log(`\nDone. Database: ${dbName}`);
 } catch (err) {
