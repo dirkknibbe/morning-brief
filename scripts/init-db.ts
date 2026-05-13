@@ -10,6 +10,83 @@
 
 import { MongoClient } from "mongodb";
 
+const IDEAS_VALIDATOR = {
+  $jsonSchema: {
+    bsonType: "object",
+    required: [
+      "slug",
+      "content_hash",
+      "title",
+      "raw_text",
+      "sources",
+      "signal_strength",
+      "status",
+      "kind",
+      "synthesis_depth",
+      "created_at",
+      "updated_at",
+    ],
+    properties: {
+      slug: { bsonType: "string", minLength: 1 },
+      content_hash: { bsonType: "string", minLength: 1 },
+      title: { bsonType: "string" },
+      raw_text: { bsonType: "string" },
+      sources: { bsonType: "array" },
+      signal_strength: { bsonType: ["int", "long", "double"], minimum: 1 },
+      status: {
+        enum: [
+          "extracted",
+          "queued",
+          "building",
+          "built",
+          "parked",
+          "rejected",
+          "needs_human",
+        ],
+      },
+      kind: { enum: ["simple", "synthesis"] },
+      synthesis_depth: { bsonType: ["int", "long"], minimum: 0, maximum: 2 },
+      parents: { bsonType: ["array", "null"] },
+      synthesis_thesis: { bsonType: ["string", "null"] },
+      success_criteria: { bsonType: ["array", "null"] },
+      prior_art: { bsonType: ["object", "null"] },
+      scores: { bsonType: ["object", "null"] },
+      rejection_reason: { bsonType: ["string", "null"] },
+      learnings: { bsonType: "array" },
+      attempts: { bsonType: ["int", "long"], minimum: 0 },
+      theme_hints: { bsonType: "array" },
+      created_at: { bsonType: "date" },
+      updated_at: { bsonType: "date" },
+    },
+    allOf: [
+      // If status is "building", success_criteria must be a non-empty array.
+      {
+        oneOf: [
+          { properties: { status: { not: { enum: ["building"] } } } },
+          {
+            required: ["success_criteria"],
+            properties: { success_criteria: { bsonType: "array", minItems: 1 } },
+          },
+        ],
+      },
+      // If kind is "synthesis", parents/synthesis_thesis required and depth ≥ 1.
+      {
+        oneOf: [
+          { properties: { kind: { not: { enum: ["synthesis"] } } } },
+          {
+            required: ["parents", "synthesis_thesis"],
+            properties: {
+              parents: { bsonType: "array", minItems: 2 },
+              synthesis_thesis: { bsonType: "string", minLength: 1 },
+              synthesis_depth: { bsonType: ["int", "long"], minimum: 1, maximum: 2 },
+            },
+          },
+        ],
+      },
+    ],
+  },
+};
+
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB ?? "morning-brief";
 
@@ -61,6 +138,17 @@ try {
   await db.collection("ideas").createIndex({ signal_strength: -1 });
   await db.collection("ideas").createIndex({ created_at: -1 });
   console.log("✓ ideas indexes");
+
+  // Apply $jsonSchema validator in WARN mode initially. Promote to STRICT
+  // after one daily cycle confirms zero violations against real data
+  // (separate one-shot, not automated here).
+  await db.command({
+    collMod: "ideas",
+    validator: IDEAS_VALIDATOR,
+    validationLevel: "moderate",
+    validationAction: "warn",
+  });
+  console.log("✓ ideas validator (warn mode)");
 
   await db.collection("audit_log").createIndex({ slug: 1, ts: -1 });
   await db.collection("audit_log").createIndex({ ts: -1 });
