@@ -19,16 +19,7 @@
 
 import { MongoClient, type Db } from "mongodb";
 import type { ExistingIdea, UpsertOp } from "./dedupe-ideas";
-
-const VALID_STATUSES = new Set([
-  "extracted",
-  "queued",
-  "building",
-  "built",
-  "parked",
-  "rejected",
-  "needs_human",
-]);
+import { type Status, isValidStatus, assertValidTransition } from "./status";
 
 export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea | null> {
   const doc = await db.collection("ideas").findOne({ content_hash: hash });
@@ -84,13 +75,24 @@ export async function getIdea(db: Db, slug: string): Promise<any | null> {
 export async function setStatus(
   db: Db,
   slug: string,
-  status: string,
+  newStatus: string,
   reason?: string,
 ): Promise<void> {
-  if (!VALID_STATUSES.has(status)) {
-    throw new Error(`invalid status: ${status} (valid: ${[...VALID_STATUSES].join(", ")})`);
+  if (!isValidStatus(newStatus)) {
+    throw new Error(`invalid status: ${newStatus}`);
   }
-  const set: Record<string, unknown> = { status, updated_at: new Date() };
+  const existing = await db
+    .collection("ideas")
+    .findOne({ slug }, { projection: { status: 1 } });
+  if (!existing) {
+    throw new Error(`no idea: ${slug}`);
+  }
+  if (!isValidStatus(existing.status)) {
+    throw new Error(`existing status corrupt for ${slug}: ${existing.status}`);
+  }
+  assertValidTransition(existing.status, newStatus);
+
+  const set: Record<string, unknown> = { status: newStatus, updated_at: new Date() };
   if (reason) set.rejection_reason = reason;
   await db.collection("ideas").updateOne({ slug }, { $set: set });
 }
