@@ -103,7 +103,7 @@ try {
 
   // Ensure collections exist (createCollection is idempotent if we catch
   // the "already exists" error).
-  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state"];
+  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state", "factory_lock"];
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(
       (c) => c.name
