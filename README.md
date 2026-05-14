@@ -60,6 +60,18 @@ claude --system-prompt triggers/listener.md
 
 Pair your Telegram chat to the session via `/telegram:access`. DMs now route here.
 
+### 7. Install git hooks (one-time per clone)
+
+The repo ships a `pre-push` hook that rejects direct pushes to `main`, tag pushes, and force-pushes. Install it once per clone:
+
+```bash
+bash scripts/install-hooks.sh
+```
+
+The installer symlinks `scripts/hooks/pre-push` into the git hooks directory (shared across worktrees). Re-running is a no-op once installed.
+
+Humans can bypass for a legitimate emergency with `git push --no-verify`. The factory agent cannot — `--no-verify` is in the `.claude/settings.json` deny list.
+
 ## Manual usage
 
 ```bash
