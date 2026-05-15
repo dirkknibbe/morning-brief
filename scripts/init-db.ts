@@ -61,27 +61,35 @@ const IDEAS_VALIDATOR = {
     allOf: [
       // If status is "building", success_criteria must be a non-empty array.
       {
-        oneOf: [
-          { properties: { status: { not: { enum: ["building"] } } } },
-          {
-            required: ["success_criteria"],
-            properties: { success_criteria: { bsonType: "array", minItems: 1 } },
+        if: {
+          required: ["status"],
+          properties: { status: { enum: ["building"] } },
+        },
+        then: {
+          required: ["success_criteria"],
+          properties: {
+            success_criteria: { bsonType: "array", minItems: 1 },
           },
-        ],
+        },
       },
-      // If kind is "synthesis", parents/synthesis_thesis required and depth ≥ 1.
+      // If kind is "synthesis", parents/synthesis_thesis required and depth >= 1.
       {
-        oneOf: [
-          { properties: { kind: { not: { enum: ["synthesis"] } } } },
-          {
-            required: ["parents", "synthesis_thesis"],
-            properties: {
-              parents: { bsonType: "array", minItems: 2 },
-              synthesis_thesis: { bsonType: "string", minLength: 1 },
-              synthesis_depth: { bsonType: ["int", "long"], minimum: 1, maximum: 2 },
+        if: {
+          required: ["kind"],
+          properties: { kind: { enum: ["synthesis"] } },
+        },
+        then: {
+          required: ["parents", "synthesis_thesis"],
+          properties: {
+            parents: { bsonType: "array", minItems: 2 },
+            synthesis_thesis: { bsonType: "string", minLength: 1 },
+            synthesis_depth: {
+              bsonType: ["int", "long"],
+              minimum: 1,
+              maximum: 2,
             },
           },
-        ],
+        },
       },
     ],
   },
