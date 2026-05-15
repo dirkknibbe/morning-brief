@@ -13,6 +13,8 @@
     "ideas": "bun run src/ideas-state.ts",
     "system-state": "bun run src/system-state.ts",
     "init-db": "bun run scripts/init-db.ts",
+    "system-state": "bun run src/system-state.ts",
+    "verify-validator": "bun run scripts/verify-ideas-validator.ts",
     "test": "bun test"
   },
   "devDependencies": {
