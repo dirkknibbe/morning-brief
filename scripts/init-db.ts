@@ -136,6 +136,7 @@ try {
   await db.collection("ideas").createIndex({ content_hash: 1 }, { unique: true });
   await db.collection("ideas").createIndex({ status: 1 });
   await db.collection("ideas").createIndex({ signal_strength: -1 });
+  await db.collection("ideas").createIndex({ status: 1, signal_strength: -1 });
   await db.collection("ideas").createIndex({ created_at: -1 });
   console.log("✓ ideas indexes");
 
