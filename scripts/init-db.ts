@@ -140,16 +140,18 @@ try {
   await db.collection("ideas").createIndex({ created_at: -1 });
   console.log("✓ ideas indexes");
 
-  // Apply $jsonSchema validator in STRICT mode. Bad writes are rejected
-  // at insert/update time. Run `bun run verify-validator` before
-  // re-promoting after any schema edit.
+  // Apply $jsonSchema validator: action=error (reject bad writes),
+  // level=moderate (re-validate updates only on docs already matching
+  // the schema — protects any pre-validator rows from breaking on
+  // innocuous updates). Run `bun run verify-validator` before
+  // re-applying after any schema edit.
   await db.command({
     collMod: "ideas",
     validator: IDEAS_VALIDATOR,
     validationLevel: "moderate",
     validationAction: "error",
   });
-  console.log("✓ ideas validator (strict mode)");
+  console.log("✓ ideas validator (error action, moderate level)");
 
   await db.collection("audit_log").createIndex({ slug: 1, ts: -1 });
   await db.collection("audit_log").createIndex({ ts: -1 });

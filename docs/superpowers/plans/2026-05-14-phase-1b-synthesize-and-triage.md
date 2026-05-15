@@ -10,7 +10,9 @@
 
 **Working directory:** `/Users/dirkknibbe/morning-brief/.claude/worktrees/busy-chandrasekhar-b7e90a`
 
-**Pre-requisite:** This plan assumes the quick-wins plan (`2026-05-14-quick-wins-validator-and-index.md`) has landed. In particular, the validator is in **strict** mode — every synthesis idea this plan inserts must satisfy the `kind=synthesis` invariants (`parents.length >= 2`, `synthesis_thesis` non-empty, `synthesis_depth` in `[1, 2]`). If the validator is still in warn mode, Tasks 5-7 will silently mask bugs.
+**Pre-requisite:** This plan assumes the quick-wins plan (`2026-05-14-quick-wins-validator-and-index.md`) has landed. In particular, the validator's `validationAction` is `error` — every synthesis idea this plan inserts must satisfy the `kind=synthesis` invariants (`parents.length >= 2`, `synthesis_thesis` non-empty, `synthesis_depth` in `[1, 2]`). If the action is still `warn`, Tasks 5-7 will silently mask bugs.
+
+**Validator interaction note for the factory plan (later):** With `validationLevel: "moderate"` + `validationAction: "error"`, an update that sets `status: "building"` on an existing idea is re-validated and will be **rejected** unless `success_criteria` is already a non-empty array on the doc (or set in the same `$set`). The triage stage (Task 7 of this plan) writes `success_criteria` via `set-triage` *before* the factory ever runs, so the natural flow is fine — but a human running `bun run ideas set-status <slug> building` directly will get a validation error. The factory plan should ensure the `queued → building` transition always coexists with a populated `success_criteria` field.
 
 **Environment:** As before — `MONGODB_URI` lives in `/Users/dirkknibbe/morning-brief/.env`. Symlink for live commands: `ln -s /Users/dirkknibbe/morning-brief/.env .env`, then `rm .env`. Never `cat`. `MONGODB_DB=morning-brief-staging`.
 
