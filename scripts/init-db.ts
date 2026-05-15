@@ -140,16 +140,16 @@ try {
   await db.collection("ideas").createIndex({ created_at: -1 });
   console.log("✓ ideas indexes");
 
-  // Apply $jsonSchema validator in WARN mode initially. Promote to STRICT
-  // after one daily cycle confirms zero violations against real data
-  // (separate one-shot, not automated here).
+  // Apply $jsonSchema validator in STRICT mode. Promoted from warn after
+  // verify-ideas-validator.ts confirmed zero violations against real data
+  // on 2026-05-14.
   await db.command({
     collMod: "ideas",
     validator: IDEAS_VALIDATOR,
     validationLevel: "moderate",
-    validationAction: "warn",
+    validationAction: "error",
   });
-  console.log("✓ ideas validator (warn mode)");
+  console.log("✓ ideas validator (strict mode)");
 
   await db.collection("audit_log").createIndex({ slug: 1, ts: -1 });
   await db.collection("audit_log").createIndex({ ts: -1 });
