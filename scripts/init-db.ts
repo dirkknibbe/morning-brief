@@ -140,9 +140,9 @@ try {
   await db.collection("ideas").createIndex({ created_at: -1 });
   console.log("✓ ideas indexes");
 
-  // Apply $jsonSchema validator in STRICT mode. Promoted from warn after
-  // verify-ideas-validator.ts confirmed zero violations against real data
-  // on 2026-05-14.
+  // Apply $jsonSchema validator in STRICT mode. Bad writes are rejected
+  // at insert/update time. Run `bun run verify-validator` before
+  // re-promoting after any schema edit.
   await db.command({
     collMod: "ideas",
     validator: IDEAS_VALIDATOR,
