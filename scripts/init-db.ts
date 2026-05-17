@@ -59,9 +59,13 @@ const IDEAS_VALIDATOR = {
       updated_at: { bsonType: "date" },
     },
     allOf: [
-      // If status is "building", success_criteria must be a non-empty array.
+      // Material implication "status=building => success_criteria has minItems 1".
+      // Equivalent: status != building OR success_criteria has items. anyOf is
+      // the right operator here (NOT oneOf — oneOf rejects docs where both
+      // branches match, which happens whenever success_criteria is set on a
+      // non-building idea, e.g. a triaged-but-not-yet-building queued idea).
       {
-        oneOf: [
+        anyOf: [
           { properties: { status: { not: { enum: ["building"] } } } },
           {
             required: ["success_criteria"],
@@ -69,9 +73,10 @@ const IDEAS_VALIDATOR = {
           },
         ],
       },
-      // If kind is "synthesis", parents/synthesis_thesis required and depth ≥ 1.
+      // Material implication "kind=synthesis => parents/synthesis_thesis required, depth >= 1".
+      // Same anyOf-not-oneOf reasoning as above.
       {
-        oneOf: [
+        anyOf: [
           { properties: { kind: { not: { enum: ["synthesis"] } } } },
           {
             required: ["parents", "synthesis_thesis"],
