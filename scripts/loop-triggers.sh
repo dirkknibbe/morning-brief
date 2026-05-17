@@ -1,9 +1,23 @@
 #!/bin/bash
-# loop-triggers.sh — daily driver for morning-brief and action-research.
+# loop-triggers.sh — daily driver for morning-brief, action-research, and ideas extraction.
 #
 # Designed to run inside tmux on a machine that stays on. Fires the
-# brief at 06:30 local, then action-research at 07:00 local, then
-# sleeps until the next day.
+# brief at 06:30 local, then action-research at 07:00 local, then runs
+# the (cheap, non-LLM) extract-ideas pass, then sleeps until the next day.
+#
+# Each step gates on system_state. The gating asymmetry is intentional:
+#   - brief and action-research are pre-existing pipelines that predate the
+#     Stage enum (`extract`, `synthesize`, `triage`, `factory`). They have no
+#     `<stage>_enabled` flag of their own, so they only honor the global
+#     `frozen` master flag via `system-state not-frozen`.
+#   - extract-ideas is a new ideas-pipeline stage. It honors both `frozen`
+#     and the per-stage `extract_enabled` flag via `system-state check extract`.
+#
+# To pause everything (including brief and action-research): `bun run system-state freeze`.
+# To pause just extraction: `bun run system-state disable extract`.
+# To pause individual brief or action-research, you'd need to add new
+# `brief_enabled` / `action_research_enabled` flags to system_state — out
+# of scope for v1.
 #
 # Usage:
 #   tmux new -d -s morning-brief 'cd ~/morning-brief && ./scripts/loop-triggers.sh'
@@ -65,11 +79,30 @@ log "loop-triggers started (brief $(printf '%02d:%02d' $BRIEF_HOUR $BRIEF_MIN), 
 while true; do
   brief_at=$(future_epoch "$BRIEF_HOUR" "$BRIEF_MIN")
   sleep_until "$brief_at" "brief"
-  fire "triggers/scheduled-brief.md" "brief"
+  if bun run system-state not-frozen 2>/dev/null; then
+    fire "triggers/scheduled-brief.md" "brief"
+  else
+    log "skipping brief: system frozen (or unreachable)"
+  fi
 
   action_at=$(future_epoch "$ACTION_HOUR" "$ACTION_MIN")
   sleep_until "$action_at" "action-research"
-  fire "triggers/action-research.md" "action-research"
+  if bun run system-state not-frozen 2>/dev/null; then
+    fire "triggers/action-research.md" "action-research"
+  else
+    log "skipping action-research: system frozen (or unreachable)"
+  fi
+
+  if bun run system-state check extract 2>/dev/null; then
+    log "running extract-ideas"
+    if bun run extract-ideas; then
+      log "extract-ideas ok"
+    else
+      log "extract-ideas failed (rc=$?) — continuing"
+    fi
+  else
+    log "skipping extract-ideas: frozen or disabled (or unreachable)"
+  fi
 
   log "cycle complete, looping"
 done
