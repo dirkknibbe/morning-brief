@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { isSynthesisEligible, buildSynthesisDoc } from "../ideas-state";
+import { isSynthesisEligible, buildSynthesisDoc, validateTriagePayload } from "../ideas-state";
 
 test("isSynthesisEligible accepts extracted/queued/parked with signal_strength >= 1 and synthesis_depth <= 1", () => {
   const base = { signal_strength: 1, synthesis_depth: 0, status: "extracted" as const };
@@ -134,8 +134,6 @@ test("buildSynthesisDoc throws if synthesis_depth would exceed 2", () => {
 });
 
 // validateTriagePayload tests
-
-import { validateTriagePayload } from "../ideas-state";
 
 test("validateTriagePayload accepts all four score keys in 1-5", () => {
   expect(() =>
