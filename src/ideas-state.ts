@@ -28,6 +28,8 @@ import { isValidStatus, assertValidTransition } from "./status";
 import { recordTransition } from "./audit";
 import { embed } from "./embeddings";
 import { findMidBandClusters, type ClusterItem } from "./cluster-ideas";
+import { slugify } from "./dedupe-ideas";
+import { createHash } from "node:crypto";
 
 export function isSynthesisEligible(idea: {
   signal_strength: number;
@@ -197,6 +199,85 @@ export async function buildSynthesisCandidates(
   }));
 }
 
+export interface SynthesisParent {
+  slug: string;
+  signal_strength: number;
+  synthesis_depth: 0 | 1 | 2;
+  theme_hints: string[];
+  status: Status;
+}
+
+export function buildSynthesisDoc(args: {
+  title: string;
+  thesis: string;
+  parents: SynthesisParent[];
+  now: Date;
+  rawText: string;
+}) {
+  const { title, thesis, parents, now, rawText } = args;
+  if (parents.length < 2) {
+    throw new Error("buildSynthesisDoc: at least 2 parents required");
+  }
+  if (parents.some((p) => p.status === "rejected")) {
+    throw new Error(
+      "buildSynthesisDoc: cannot synthesize when any parent is rejected",
+    );
+  }
+  const maxDepth = Math.max(...parents.map((p) => p.synthesis_depth));
+  const newDepth = maxDepth + 1;
+  if (newDepth > 2) {
+    throw new Error(
+      `buildSynthesisDoc: synthesis_depth would be ${newDepth} (max is 2)`,
+    );
+  }
+  const maxSig = Math.max(...parents.map((p) => p.signal_strength));
+  const themeUnion = Array.from(
+    new Set(parents.flatMap((p) => p.theme_hints)),
+  );
+  return {
+    slug: slugify(title),
+    content_hash: createHash("sha256")
+      .update(`synthesis:${parents.map((p) => p.slug).sort().join("|")}:${title}`)
+      .digest("hex"),
+    title,
+    raw_text: rawText,
+    sources: parents.map((p) => ({ brief: `parent:${p.slug}`, section: "synthesis" })),
+    signal_strength: maxSig + 1,
+    theme_hints: themeUnion,
+    status: "extracted" as const,
+    kind: "synthesis" as const,
+    parents: parents.map((p) => p.slug),
+    synthesis_thesis: thesis,
+    synthesis_depth: newDepth as 1 | 2,
+    prior_art: null,
+    scores: null,
+    success_criteria: null,
+    rejection_reason: null,
+    learnings: [] as string[],
+    attempts: 0,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function parseFlagArgs(argv: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const val = argv[i + 1];
+      if (val && !val.startsWith("--")) {
+        out[key] = val;
+        i++;
+      } else {
+        out[key] = "true";
+      }
+    }
+  }
+  return out;
+}
+
 // CLI
 if (import.meta.main) {
   const uri = process.env.MONGODB_URI;
@@ -241,8 +322,46 @@ if (import.meta.main) {
       }).toArray();
       const candidates = await buildSynthesisCandidates(ideas as any);
       console.log(JSON.stringify(candidates, null, 2));
+    } else if (mode === "insert-synthesis") {
+      const args = parseFlagArgs(process.argv.slice(3));
+      const parentSlugs = (args.parents ?? "").split(",").filter(Boolean);
+      if (parentSlugs.length < 2) {
+        console.error("insert-synthesis: --parents needs >=2 slugs (comma-separated)");
+        process.exit(1);
+      }
+      const title = args.title;
+      const thesis = args.thesis;
+      const rawText = args["raw-text"] ?? thesis;
+      if (!title || !thesis) {
+        console.error("insert-synthesis: --title and --thesis are required");
+        process.exit(1);
+      }
+      const parents = await db
+        .collection("ideas")
+        .find({ slug: { $in: parentSlugs } })
+        .toArray();
+      if (parents.length !== parentSlugs.length) {
+        const found = new Set(parents.map((p: any) => p.slug));
+        const missing = parentSlugs.filter((s) => !found.has(s));
+        console.error("insert-synthesis: parent(s) not found:", missing.join(", "));
+        process.exit(1);
+      }
+      const doc = buildSynthesisDoc({
+        title,
+        thesis,
+        parents: parents as any,
+        now: new Date(),
+        rawText,
+      });
+      await db.collection("ideas").insertOne(doc);
+      try {
+        await recordTransition(db, doc.slug, null, "extracted", "user-cli", `parents=${doc.parents.join(",")}`);
+      } catch (e) {
+        console.error(`audit: recordTransition failed for ${doc.slug}:`, (e as Error).message);
+      }
+      console.log(`✓ inserted synthesis ${doc.slug} (parents: ${doc.parents.join(", ")})`);
     } else {
-      console.error("usage: ideas-state <list|show|set-status|cluster-candidates> [args]");
+      console.error("usage: ideas-state <list|show|set-status|cluster-candidates|insert-synthesis> [args]");
       process.exit(1);
     }
   } finally {
