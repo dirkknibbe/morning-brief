@@ -23,8 +23,28 @@
 
 import { MongoClient, type Db } from "mongodb";
 import type { ExistingIdea, UpsertOp } from "./dedupe-ideas";
+import type { Status } from "./status";
 import { isValidStatus, assertValidTransition } from "./status";
 import { recordTransition } from "./audit";
+import { embed } from "./embeddings";
+import { findMidBandClusters, type ClusterItem } from "./cluster-ideas";
+
+export function isSynthesisEligible(idea: {
+  signal_strength: number;
+  synthesis_depth: number;
+  status: Status;
+}): boolean {
+  const ELIGIBLE_STATUSES: ReadonlySet<Status> = new Set([
+    "extracted",
+    "queued",
+    "parked",
+  ]);
+  return (
+    ELIGIBLE_STATUSES.has(idea.status) &&
+    idea.signal_strength >= 1 &&
+    idea.synthesis_depth <= 1
+  );
+}
 
 export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea | null> {
   const doc = await db.collection("ideas").findOne({ content_hash: hash });
@@ -125,6 +145,58 @@ export async function setStatus(
   }
 }
 
+/**
+ * Returns up to 10 clusters of 2-4 idea slugs each, plus the full idea
+ * records hydrated for the synthesize trigger to read. Pure-logic
+ * inputs/outputs — Mongo I/O is in the calling CLI subcommand.
+ */
+export async function buildSynthesisCandidates(
+  ideas: ReadonlyArray<{
+    slug: string;
+    title: string;
+    raw_text: string;
+    signal_strength: number;
+    synthesis_depth: number;
+    status: Status;
+    theme_hints: string[];
+  }>,
+): Promise<
+  Array<{
+    cluster_slugs: string[];
+    ideas: Array<{
+      slug: string;
+      title: string;
+      raw_text: string;
+      theme_hints: string[];
+    }>;
+  }>
+> {
+  const eligible = ideas.filter(isSynthesisEligible);
+  if (eligible.length < 2) return [];
+
+  const embedded: ClusterItem[] = [];
+  for (const idea of eligible) {
+    const text = `${idea.title}\n${idea.raw_text.split("\n")[0] ?? ""}`;
+    const e = await embed(text);
+    embedded.push({ id: idea.slug, embedding: e });
+  }
+
+  const clusters = findMidBandClusters(embedded);
+  const bySlug = new Map(eligible.map((i) => [i.slug, i]));
+  return clusters.map((slugs) => ({
+    cluster_slugs: slugs,
+    ideas: slugs.map((s) => {
+      const i = bySlug.get(s)!;
+      return {
+        slug: i.slug,
+        title: i.title,
+        raw_text: i.raw_text,
+        theme_hints: i.theme_hints,
+      };
+    }),
+  }));
+}
+
 // CLI
 if (import.meta.main) {
   const uri = process.env.MONGODB_URI;
@@ -160,8 +232,17 @@ if (import.meta.main) {
       }
       await setStatus(db, slug, status, "user-cli", reason);
       console.log(`✓ ${slug} → ${status}${reason ? ` (${reason})` : ""}`);
+    } else if (mode === "cluster-candidates") {
+      const ideas = await db.collection("ideas").find({}, {
+        projection: {
+          slug: 1, title: 1, raw_text: 1,
+          signal_strength: 1, synthesis_depth: 1, status: 1, theme_hints: 1,
+        },
+      }).toArray();
+      const candidates = await buildSynthesisCandidates(ideas as any);
+      console.log(JSON.stringify(candidates, null, 2));
     } else {
-      console.error("usage: ideas-state <list|show|set-status> [args]");
+      console.error("usage: ideas-state <list|show|set-status|cluster-candidates> [args]");
       process.exit(1);
     }
   } finally {
