@@ -104,5 +104,27 @@ while true; do
     log "skipping extract-ideas: frozen or disabled (or unreachable)"
   fi
 
+  if bun run system-state check synthesize 2>/dev/null; then
+    log "running synthesize"
+    if ./scripts/run-trigger.sh triggers/synthesize.md; then
+      log "synthesize ok"
+    else
+      log "synthesize failed (rc=$?) — continuing"
+    fi
+  else
+    log "skipping synthesize: frozen or disabled (or unreachable)"
+  fi
+
+  if bun run system-state check triage 2>/dev/null; then
+    log "running triage"
+    if ./scripts/run-trigger.sh triggers/triage.md; then
+      log "triage ok"
+    else
+      log "triage failed (rc=$?) — continuing"
+    fi
+  else
+    log "skipping triage: frozen or disabled (or unreachable)"
+  fi
+
   log "cycle complete, looping"
 done
