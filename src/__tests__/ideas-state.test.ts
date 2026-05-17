@@ -132,3 +132,47 @@ test("buildSynthesisDoc throws if synthesis_depth would exceed 2", () => {
     }),
   ).toThrow(/depth/);
 });
+
+// validateTriagePayload tests
+
+import { validateTriagePayload } from "../ideas-state";
+
+test("validateTriagePayload accepts all four score keys in 1-5", () => {
+  expect(() =>
+    validateTriagePayload({
+      scores: { novelty: 5, fit: 3, buildable: 2, scope: 4 },
+      success_criteria: ["criterion one"],
+      prior_art: { twist: "a twist", sources: [{ url: "https://x", takeaway: "t" }] },
+    }),
+  ).not.toThrow();
+});
+
+test("validateTriagePayload rejects scores outside 1-5", () => {
+  expect(() =>
+    validateTriagePayload({
+      scores: { novelty: 6, fit: 3, buildable: 2, scope: 4 },
+      success_criteria: ["x"],
+      prior_art: { twist: "t", sources: [] },
+    }),
+  ).toThrow(/novelty/);
+});
+
+test("validateTriagePayload rejects empty success_criteria (build loop needs targets)", () => {
+  expect(() =>
+    validateTriagePayload({
+      scores: { novelty: 3, fit: 3, buildable: 3, scope: 3 },
+      success_criteria: [],
+      prior_art: { twist: "t", sources: [] },
+    }),
+  ).toThrow(/success_criteria/);
+});
+
+test("validateTriagePayload rejects missing twist (the differentiator is load-bearing)", () => {
+  expect(() =>
+    validateTriagePayload({
+      scores: { novelty: 3, fit: 3, buildable: 3, scope: 3 },
+      success_criteria: ["x"],
+      prior_art: { twist: "", sources: [] },
+    } as any),
+  ).toThrow(/twist/);
+});

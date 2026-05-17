@@ -260,6 +260,35 @@ export function buildSynthesisDoc(args: {
   };
 }
 
+export interface TriagePayload {
+  scores: {
+    novelty: number;
+    fit: number;
+    buildable: number;
+    scope: number;
+  };
+  success_criteria: string[];
+  prior_art: {
+    twist: string;
+    sources: Array<{ url: string; takeaway: string }>;
+  };
+}
+
+export function validateTriagePayload(p: TriagePayload): void {
+  for (const key of ["novelty", "fit", "buildable", "scope"] as const) {
+    const v = p.scores[key];
+    if (!Number.isInteger(v) || v < 1 || v > 5) {
+      throw new Error(`scores.${key} must be integer in [1, 5], got ${v}`);
+    }
+  }
+  if (!Array.isArray(p.success_criteria) || p.success_criteria.length === 0) {
+    throw new Error("success_criteria must be a non-empty array");
+  }
+  if (!p.prior_art || typeof p.prior_art.twist !== "string" || p.prior_art.twist.trim().length === 0) {
+    throw new Error("prior_art.twist must be a non-empty string");
+  }
+}
+
 function parseFlagArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (let i = 0; i < argv.length; i++) {
@@ -360,8 +389,37 @@ if (import.meta.main) {
         console.error(`audit: recordTransition failed for ${doc.slug}:`, (e as Error).message);
       }
       console.log(`✓ inserted synthesis ${doc.slug} (parents: ${doc.parents.join(", ")})`);
+    } else if (mode === "set-triage") {
+      const args = parseFlagArgs(process.argv.slice(3));
+      const slug = args.slug;
+      if (!slug) {
+        console.error("set-triage: --slug required");
+        process.exit(1);
+      }
+      const payload: TriagePayload = {
+        scores: JSON.parse(args.scores ?? "{}"),
+        success_criteria: JSON.parse(args["criteria-json"] ?? "[]"),
+        prior_art: JSON.parse(args["prior-art-json"] ?? "{}"),
+      };
+      validateTriagePayload(payload);
+      const result = await db.collection("ideas").updateOne(
+        { slug },
+        {
+          $set: {
+            scores: payload.scores,
+            success_criteria: payload.success_criteria,
+            prior_art: payload.prior_art,
+            updated_at: new Date(),
+          },
+        },
+      );
+      if (result.matchedCount === 0) {
+        console.error(`set-triage: idea not found: ${slug}`);
+        process.exit(1);
+      }
+      console.log(`✓ triage recorded for ${slug}`);
     } else {
-      console.error("usage: ideas-state <list|show|set-status|cluster-candidates|insert-synthesis> [args]");
+      console.error("usage: ideas-state <list|show|set-status|cluster-candidates|insert-synthesis|set-triage> [args]");
       process.exit(1);
     }
   } finally {
