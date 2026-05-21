@@ -23,8 +23,30 @@
 
 import { MongoClient, type Db } from "mongodb";
 import type { ExistingIdea, UpsertOp } from "./dedupe-ideas";
+import type { Status } from "./status";
 import { isValidStatus, assertValidTransition } from "./status";
 import { recordTransition } from "./audit";
+import { embed } from "./embeddings";
+import { findMidBandClusters, type ClusterItem } from "./cluster-ideas";
+import { slugify } from "./dedupe-ideas";
+import { createHash } from "node:crypto";
+
+export function isSynthesisEligible(idea: {
+  signal_strength: number;
+  synthesis_depth: number;
+  status: Status;
+}): boolean {
+  const ELIGIBLE_STATUSES: ReadonlySet<Status> = new Set([
+    "extracted",
+    "queued",
+    "parked",
+  ]);
+  return (
+    ELIGIBLE_STATUSES.has(idea.status) &&
+    idea.signal_strength >= 1 &&
+    idea.synthesis_depth <= 1
+  );
+}
 
 export async function findIdeaByHash(db: Db, hash: string): Promise<ExistingIdea | null> {
   const doc = await db.collection("ideas").findOne({ content_hash: hash });
@@ -125,6 +147,166 @@ export async function setStatus(
   }
 }
 
+/**
+ * Returns up to 10 clusters of 2-4 idea slugs each, plus the full idea
+ * records hydrated for the synthesize trigger to read. Pure-logic
+ * inputs/outputs — Mongo I/O is in the calling CLI subcommand.
+ */
+export async function buildSynthesisCandidates(
+  ideas: ReadonlyArray<{
+    slug: string;
+    title: string;
+    raw_text: string;
+    signal_strength: number;
+    synthesis_depth: number;
+    status: Status;
+    theme_hints: string[];
+  }>,
+): Promise<
+  Array<{
+    cluster_slugs: string[];
+    ideas: Array<{
+      slug: string;
+      title: string;
+      raw_text: string;
+      theme_hints: string[];
+    }>;
+  }>
+> {
+  const eligible = ideas.filter(isSynthesisEligible);
+  if (eligible.length < 2) return [];
+
+  const embedded: ClusterItem[] = [];
+  for (const idea of eligible) {
+    const text = `${idea.title}\n${idea.raw_text.split("\n")[0] ?? ""}`;
+    const e = await embed(text);
+    embedded.push({ id: idea.slug, embedding: e });
+  }
+
+  const clusters = findMidBandClusters(embedded);
+  const bySlug = new Map(eligible.map((i) => [i.slug, i]));
+  return clusters.map((slugs) => ({
+    cluster_slugs: slugs,
+    ideas: slugs.map((s) => {
+      const i = bySlug.get(s)!;
+      return {
+        slug: i.slug,
+        title: i.title,
+        raw_text: i.raw_text,
+        theme_hints: i.theme_hints,
+      };
+    }),
+  }));
+}
+
+export interface SynthesisParent {
+  slug: string;
+  signal_strength: number;
+  synthesis_depth: 0 | 1 | 2;
+  theme_hints: string[];
+  status: Status;
+}
+
+export function buildSynthesisDoc(args: {
+  title: string;
+  thesis: string;
+  parents: SynthesisParent[];
+  now: Date;
+  rawText: string;
+}) {
+  const { title, thesis, parents, now, rawText } = args;
+  if (parents.length < 2) {
+    throw new Error("buildSynthesisDoc: at least 2 parents required");
+  }
+  if (parents.some((p) => p.status === "rejected")) {
+    throw new Error(
+      "buildSynthesisDoc: cannot synthesize when any parent is rejected",
+    );
+  }
+  const maxDepth = Math.max(...parents.map((p) => p.synthesis_depth));
+  const newDepth = maxDepth + 1;
+  if (newDepth > 2) {
+    throw new Error(
+      `buildSynthesisDoc: synthesis_depth would be ${newDepth} (max is 2)`,
+    );
+  }
+  const maxSig = Math.max(...parents.map((p) => p.signal_strength));
+  const themeUnion = Array.from(
+    new Set(parents.flatMap((p) => p.theme_hints)),
+  );
+  return {
+    slug: slugify(title),
+    content_hash: createHash("sha256")
+      .update(`synthesis:${parents.map((p) => p.slug).sort().join("|")}:${title}`)
+      .digest("hex"),
+    title,
+    raw_text: rawText,
+    sources: parents.map((p) => ({ brief: `parent:${p.slug}`, section: "synthesis" })),
+    signal_strength: maxSig + 1,
+    theme_hints: themeUnion,
+    status: "extracted" as const,
+    kind: "synthesis" as const,
+    parents: parents.map((p) => p.slug),
+    synthesis_thesis: thesis,
+    synthesis_depth: newDepth as 1 | 2,
+    prior_art: null,
+    scores: null,
+    success_criteria: null,
+    rejection_reason: null,
+    learnings: [] as string[],
+    attempts: 0,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export interface TriagePayload {
+  scores: {
+    novelty: number;
+    fit: number;
+    buildable: number;
+    scope: number;
+  };
+  success_criteria: string[];
+  prior_art: {
+    twist: string;
+    sources: Array<{ url: string; takeaway: string }>;
+  };
+}
+
+export function validateTriagePayload(p: TriagePayload): void {
+  for (const key of ["novelty", "fit", "buildable", "scope"] as const) {
+    const v = p.scores[key];
+    if (!Number.isInteger(v) || v < 1 || v > 5) {
+      throw new Error(`scores.${key} must be integer in [1, 5], got ${v}`);
+    }
+  }
+  if (!Array.isArray(p.success_criteria) || p.success_criteria.length === 0) {
+    throw new Error("success_criteria must be a non-empty array");
+  }
+  if (!p.prior_art || typeof p.prior_art.twist !== "string" || p.prior_art.twist.trim().length === 0) {
+    throw new Error("prior_art.twist must be a non-empty string");
+  }
+}
+
+function parseFlagArgs(argv: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const val = argv[i + 1];
+      if (val && !val.startsWith("--")) {
+        out[key] = val;
+        i++;
+      } else {
+        out[key] = "true";
+      }
+    }
+  }
+  return out;
+}
+
 // CLI
 if (import.meta.main) {
   const uri = process.env.MONGODB_URI;
@@ -160,8 +342,84 @@ if (import.meta.main) {
       }
       await setStatus(db, slug, status, "user-cli", reason);
       console.log(`✓ ${slug} → ${status}${reason ? ` (${reason})` : ""}`);
+    } else if (mode === "cluster-candidates") {
+      const ideas = await db.collection("ideas").find({}, {
+        projection: {
+          slug: 1, title: 1, raw_text: 1,
+          signal_strength: 1, synthesis_depth: 1, status: 1, theme_hints: 1,
+        },
+      }).toArray();
+      const candidates = await buildSynthesisCandidates(ideas as any);
+      console.log(JSON.stringify(candidates, null, 2));
+    } else if (mode === "insert-synthesis") {
+      const args = parseFlagArgs(process.argv.slice(3));
+      const parentSlugs = (args.parents ?? "").split(",").filter(Boolean);
+      if (parentSlugs.length < 2) {
+        console.error("insert-synthesis: --parents needs >=2 slugs (comma-separated)");
+        process.exit(1);
+      }
+      const title = args.title;
+      const thesis = args.thesis;
+      const rawText = args["raw-text"] ?? thesis;
+      if (!title || !thesis) {
+        console.error("insert-synthesis: --title and --thesis are required");
+        process.exit(1);
+      }
+      const parents = await db
+        .collection("ideas")
+        .find({ slug: { $in: parentSlugs } })
+        .toArray();
+      if (parents.length !== parentSlugs.length) {
+        const found = new Set(parents.map((p: any) => p.slug));
+        const missing = parentSlugs.filter((s) => !found.has(s));
+        console.error("insert-synthesis: parent(s) not found:", missing.join(", "));
+        process.exit(1);
+      }
+      const doc = buildSynthesisDoc({
+        title,
+        thesis,
+        parents: parents as any,
+        now: new Date(),
+        rawText,
+      });
+      await db.collection("ideas").insertOne(doc);
+      try {
+        await recordTransition(db, doc.slug, null, "extracted", "user-cli", `parents=${doc.parents.join(",")}`);
+      } catch (e) {
+        console.error(`audit: recordTransition failed for ${doc.slug}:`, (e as Error).message);
+      }
+      console.log(`✓ inserted synthesis ${doc.slug} (parents: ${doc.parents.join(", ")})`);
+    } else if (mode === "set-triage") {
+      const args = parseFlagArgs(process.argv.slice(3));
+      const slug = args.slug;
+      if (!slug) {
+        console.error("set-triage: --slug required");
+        process.exit(1);
+      }
+      const payload: TriagePayload = {
+        scores: JSON.parse(args.scores ?? "{}"),
+        success_criteria: JSON.parse(args["criteria-json"] ?? "[]"),
+        prior_art: JSON.parse(args["prior-art-json"] ?? "{}"),
+      };
+      validateTriagePayload(payload);
+      const result = await db.collection("ideas").updateOne(
+        { slug },
+        {
+          $set: {
+            scores: payload.scores,
+            success_criteria: payload.success_criteria,
+            prior_art: payload.prior_art,
+            updated_at: new Date(),
+          },
+        },
+      );
+      if (result.matchedCount === 0) {
+        console.error(`set-triage: idea not found: ${slug}`);
+        process.exit(1);
+      }
+      console.log(`✓ triage recorded for ${slug}`);
     } else {
-      console.error("usage: ideas-state <list|show|set-status> [args]");
+      console.error("usage: ideas-state <list|show|set-status|cluster-candidates|insert-synthesis|set-triage> [args]");
       process.exit(1);
     }
   } finally {
