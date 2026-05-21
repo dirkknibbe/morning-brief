@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# pre-push hook — block destructive/unintended pushes.
+#
+# Rejects:
+#   - Push to refs/heads/main directly (PRs only).
+#   - Push of any tag (refs/tags/*).
+#   - Force-push (existing remote SHA is not an ancestor of the new SHA).
+#
+# The hook reads one line per pushed ref on stdin, in the format:
+#   <local-ref> <local-sha> <remote-ref> <remote-sha>
+#
+# A remote SHA of all zeros (40 zeros) means "branch is new on remote" —
+# that's a normal first push, not a force push.
+#
+# To bypass for a legitimate emergency: `git push --no-verify` (humans only;
+# agents are blocked from --no-verify via the .claude/settings.json deny list).
+
+set -euo pipefail
+
+ZERO_SHA="0000000000000000000000000000000000000000"
+rejected=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip the delete-ref case (local_sha is all zeros) — git is asking the remote
+  # to delete a branch; we don't have policy on that here.
+  if [ "$local_sha" = "$ZERO_SHA" ]; then
+    continue
+  fi
+
+  # Block direct push to main.
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "pre-push: refusing push to main — open a PR instead." >&2
+    rejected=1
+    continue
+  fi
+
+  # Block tag pushes.
+  case "$remote_ref" in
+    refs/tags/*)
+      echo "pre-push: refusing tag push ($remote_ref) — tags are not part of the factory workflow." >&2
+      rejected=1
+      continue
+      ;;
+  esac
+
+  # Block force-push: if remote_sha is non-zero AND not an ancestor of local_sha.
+  if [ "$remote_sha" != "$ZERO_SHA" ]; then
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+      echo "pre-push: refusing force-push to $remote_ref (remote $remote_sha not an ancestor of local $local_sha)." >&2
+      rejected=1
+      continue
+    fi
+  fi
+done
+
+exit "$rejected"

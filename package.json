@@ -9,7 +9,11 @@
     "web": "bun run src/web-fetch.ts",
     "send": "bun run src/telegram.ts",
     "send:dry": "bun run src/telegram.ts --dry-run",
+    "extract-ideas": "bun run src/extract-ideas.ts",
+    "ideas": "bun run src/ideas-state.ts",
+    "system-state": "bun run src/system-state.ts",
     "init-db": "bun run scripts/init-db.ts",
+    "verify-validator": "bun run scripts/verify-ideas-validator.ts",
     "test": "bun test"
   },
   "devDependencies": {
@@ -17,6 +21,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "mongodb": "^7.1.1"
   }
 }
