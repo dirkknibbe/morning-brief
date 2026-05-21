@@ -19,6 +19,7 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 - Revenue target: even $50-100/month recurring to start.
 - Stack: TypeScript/Bun, Java/Spring Boot, Kafka, Kubernetes.
 - Distribution model: MCPAASTA (MCP As A Service To Agents) with micropayment rails.
+- Also tracking: Anthropic skills/subagents, and meta-agent / outer-harness orchestration systems — Archon, Symphony (OpenAI), AutoGen/AG2, MetaGPT, CAMEL, Letta, Magentic-One, OpenAI Agents SDK/Swarm, LangGraph multi-actor, CrewAI. Coding/IDE harnesses (Cursor, Aider, Claude Code) are **not** in scope for this brief.
 
 ## Step-by-step
 
@@ -71,7 +72,7 @@ Structure:
 - `🔥 *Hot Signals*` — new tools, launches, trends.
 - `😤 *Developer Friction*` — complaints, pain points, things broken or missing. **This is where the money is.**
 - `💰 *Monetization Patterns*` — how others are charging.
-- `🛠️ *New MCP/Agent Tools*` — repos, frameworks, servers worth examining.
+- `🛠️ *Meta-Agents, Skills & MCP Tools*` — orchestration harnesses (Archon, Symphony, AutoGen…), Anthropic skills/subagents, MCP servers, and other repos/frameworks worth examining.
 - `📈 *Still Trending*` — items marked `isReturning` with `times_seen >= 2`, one-liner each.
 - `💡 *Opportunity Sparks*` — 2-3 concrete micro-SaaS or API ideas Dirk could build.
 - **One action item** Dirk could execute today.

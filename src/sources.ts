@@ -35,6 +35,12 @@ const HN_QUERIES = [
   "llm api",
   "claude api",
   "browser automation agent",
+  "meta agent",
+  "multi agent orchestration",
+  "archon agent",
+  "autogen agent",
+  "metagpt",
+  "openai symphony",
 ];
 
 export async function fetchHackerNews(): Promise<RawItem[]> {
@@ -87,6 +93,7 @@ const SUBREDDITS = [
   "AutoGPT",
   "ChatGPTCoding",
   "selfhosted",
+  "AI_Agents",
 ];
 
 const REDDIT_SEARCHES = [
@@ -94,6 +101,10 @@ const REDDIT_SEARCHES = [
   { sub: "all", q: "AI agent tool API" },
   { sub: "all", q: "browser automation LLM" },
   { sub: "all", q: "micropayment API developer" },
+  { sub: "all", q: "archon symphony meta agent" },
+  { sub: "all", q: "multi-agent orchestration framework" },
+  { sub: "all", q: "agent of agents builder" },
+  { sub: "all", q: "openai symphony agent" },
 ];
 
 async function redditFetch(url: string): Promise<any> {
@@ -176,6 +187,12 @@ const GH_QUERIES = [
   "browser-use agent",
   "llm micropayment",
   "agent framework",
+  "meta-agent orchestration",
+  "multi-agent framework",
+  "archon agent builder",
+  "autogen ag2",
+  "letta agent",
+  "openai symphony",
 ];
 
 export async function fetchGitHub(): Promise<RawItem[]> {
