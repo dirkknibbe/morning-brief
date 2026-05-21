@@ -117,6 +117,30 @@ bun test && bunx tsc --noEmit
 
 ---
 
+---
+
+## 2026-05-20 update
+
+Picked option 4 (let the loop run for ~1 week). Resolved/recorded:
+
+- **Rehearsal strays: accepted as historical artifact, NOT cleaned up.** The two stray commits (`a0dac94`, `3ec4477`) now sit two real loop products deep on `rehearsal` (`abd0cd4 brief: 2026-05-17`, `3d2a56c brief: 2026-05-20`, `8d85f38 action-research: 2026-05-20`). Rebase-drop would have required force-pushing a published branch + user `--no-verify` (agents are deny-listed). Strays are inert (already cherry-picked here as `1ccd9b2`, `3579661`) and trivially distinguishable by commit-message prefix: `feat(triggers):` is stray, `brief:`/`action-research:` is real loop output. **Do not relitigate.**
+
+- **Meta-agent scope widening landed on `rehearsal` (`3a9de85`).** `src/sources.ts` adds HN/Reddit/GH search queries for `archon`, `symphony`, `autogen`, `metagpt`, `letta`, etc. + `r/AI_Agents`. `triggers/scheduled-brief.md` adds a meta-agent focus block and renames the brief's tools section from `New MCP/Agent Tools` → `Meta-Agents, Skills & MCP Tools`. The rename is safe: `extract-ideas` reads section names structurally (no hardcoded matches), so new ideas will just carry the new section string in `source_section`.
+
+- **Loop config verified end-to-end on this feature branch.** `bunx tsc --noEmit` clean, `bun test` 71 pass / 7 skip (lock tests, env-dependent) / 0 fail. `scripts/loop-triggers.sh` gates correctly: `not-frozen` for brief + action-research, then `check extract`/`check synthesize`/`check triage`.
+
+- **`.env` still missing at `/Users/dirkknibbe/morning-brief/.env`.** Loop will dry-fail on Mongo writes until the user recreates it. Live smokes remain blocked. **Owner: user.**
+
+- **Two uncommitted files in the main worktree from a prior session were the user's own meta-agent scope edits** — committed and pushed to `rehearsal` as `3a9de85`. Working tree clean now.
+
+### Next session entry checklist
+
+1. Confirm `rehearsal` tip is still a `brief:`-prefixed or `action-research:`-prefixed commit (real loop output). If a fresh `feat(triggers):` lands there, an implementer is again writing in the wrong worktree.
+2. Check `.env` exists at `/Users/dirkknibbe/morning-brief/.env`. If yes, live smokes are unblocked.
+3. After ~1 week of real loop output, read `triage` results (`bun run ideas list --status queued`) to see what `success_criteria` patterns emerge. **That** is the input to the factory plan, not up-front design.
+
+---
+
 ## Reference files
 
 - **Spec:** `docs/superpowers/specs/2026-05-11-ideas-pipeline-and-code-factory-design.md`
