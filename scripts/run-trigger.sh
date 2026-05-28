@@ -20,6 +20,22 @@ if [ -z "$TRIGGER" ] || [ ! -f "$TRIGGER" ]; then
   exit 2
 fi
 
+STEM="$(basename "$TRIGGER" .md)"
+
+# Time-based dedupe: skip if this trigger ran within the last 21 hours.
+# Catches RunAtLoad fires on login (when today's scheduled run already
+# completed) and prevents rapid re-fires from launchd glitches. 21h not
+# 24h so consecutive 6am runs don't accidentally block each other.
+LAST_RUN="/tmp/morning-brief-${STEM}-last-run"
+if [ -f "$LAST_RUN" ]; then
+  AGE=$(( $(date +%s) - $(stat -f %m "$LAST_RUN") ))
+  if [ "$AGE" -lt 75600 ]; then
+    echo "$(date -Iseconds) $STEM ran ${AGE}s ago (< 21h), skipping" >&2
+    exit 0
+  fi
+fi
+touch "$LAST_RUN"
+
 # Load .env if present. Allow KEY="value" and KEY=value.
 if [ -f .env ]; then
   set -a
@@ -32,7 +48,6 @@ fi
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 mkdir -p logs
-STEM="$(basename "$TRIGGER" .md)"
 DATE="$(date +%Y-%m-%d)"
 LOG="logs/${STEM}-${DATE}.log"
 
