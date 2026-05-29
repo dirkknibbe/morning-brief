@@ -109,3 +109,29 @@ test("parseIdeasFromBrief: title strips markdown emphasis and survives compound-
   // Dot inside "1.x" must not split mid-version.
   expect(sparks[1].title).toBe("MCP 1.x audit harness");
 });
+
+test("parseIdeasFromBrief: action with leading em-dash yields a non-empty title", () => {
+  // Real-world format from briefs/2026-05-11.md: "*Today's Action* — <content>".
+  // The capture group keeps the leading em-dash; summarize() must not return the
+  // empty clause that precedes it (that produced slug="" → validator code 121).
+  const md = `🎯 *Today's Action* — Read the streetai escrow piece. Then sketch the billing map.
+
+next paragraph
+`;
+  const result = parseIdeasFromBrief(md, "briefs/2026-05-11.md");
+  const actions = result.filter((r) => r.source_section === "Action for today");
+  expect(actions.length).toBe(1);
+  expect(actions[0].title).toBe("Read the streetai escrow piece");
+});
+
+test("parseIdeasFromBrief: action that reduces to empty emits no candidate", () => {
+  // Degenerate action body (just a delimiter) → no usable title. Must be
+  // skipped, not emitted with title:"" (which becomes slug:"" → validator 121).
+  const md = `🎯 *Today's Action* —
+
+next paragraph
+`;
+  const result = parseIdeasFromBrief(md, "briefs/2026-05-11.md");
+  const actions = result.filter((r) => r.source_section === "Action for today");
+  expect(actions.length).toBe(0);
+});

@@ -19,8 +19,12 @@ function summarize(text: string, maxLen = 80): string {
   // Prefer the em-dash/en-dash as the title/description boundary (common in briefs).
   // Fall back to a period followed by a space. Don't split on bare hyphens —
   // they appear inside compound words like "Agent-spend" and dot-versions like "1.x".
+  // Take the first NON-EMPTY clause. Text that begins with the delimiter
+  // (e.g. "— Read the foo", which happens when an action is "*Header* — content")
+  // would otherwise make split[0] === "" → empty title → empty slug, which the
+  // ideas $jsonSchema rejects (slug minLength 1), aborting the extract run.
   const split = stripped.split(/[—–]|\.\s/);
-  const firstClause = split[0].trim();
+  const firstClause = split.map((s) => s.trim()).find((s) => s.length > 0) ?? "";
   return firstClause.length <= maxLen ? firstClause : firstClause.slice(0, maxLen).trim();
 }
 
@@ -60,14 +64,20 @@ export function parseIdeasFromBrief(markdown: string, source_file: string): Idea
   const action = markdown.match(actionRe);
   if (action) {
     const text = action[1].trim();
-    out.push({
-      title: summarize(text),
-      raw_text: text,
-      source_file,
-      source_section: "Action for today",
-      theme_hints: [],
-      extracted_at: now,
-    });
+    const title = summarize(text);
+    // Skip degenerate matches that yield no usable title (mirrors the
+    // Opportunity Sparks `if (!text) continue` guard above). An empty title
+    // becomes an empty slug, which the ideas $jsonSchema rejects.
+    if (title) {
+      out.push({
+        title,
+        raw_text: text,
+        source_file,
+        source_section: "Action for today",
+        theme_hints: [],
+        extracted_at: now,
+      });
+    }
   }
 
   return out;

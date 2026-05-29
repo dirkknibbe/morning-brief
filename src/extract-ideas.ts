@@ -14,10 +14,9 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { MongoClient } from "mongodb";
 import { parseIdeasFromBrief, parseIdeasFromAction, type IdeaCandidate } from "./parse-ideas";
-import { contentHash } from "./content-hash";
-import { decideUpsertOp } from "./dedupe-ideas";
 import { findIdeaByHash, applyUpsertOp } from "./ideas-state";
 import { isFrozen, isEnabled } from "./system-state";
+import { runExtraction } from "./extract-core";
 
 function readDirMarkdown(dir: string): { path: string; body: string }[] {
   if (!existsSync(dir)) return [];
@@ -42,19 +41,19 @@ const candidates: IdeaCandidate[] = [
   ...actions.flatMap((f) => parseIdeasFromAction(f.body, f.path)),
 ];
 
-const summary = {
+const scanned = {
   briefs_scanned: briefs.length,
   actions_scanned: actions.length,
-  candidates: candidates.length,
-  inserted: 0,
-  reinforced: 0,
-  skipped: 0,
 };
 
 if (dryRun) {
   console.log(
     JSON.stringify(
-      { ...summary, sample: candidates.slice(0, 5).map((c) => ({ title: c.title, source: c.source_file, section: c.source_section })) },
+      {
+        ...scanned,
+        candidates: candidates.length,
+        sample: candidates.slice(0, 5).map((c) => ({ title: c.title, source: c.source_file, section: c.source_section })),
+      },
       null,
       2,
     ),
@@ -79,16 +78,11 @@ try {
     process.exit(0);
   }
 
-  for (const c of candidates) {
-    const hash = contentHash(c.title, c.raw_text);
-    const existing = await findIdeaByHash(db, hash);
-    const op = decideUpsertOp(c, hash, existing);
-    if (op.kind === "insert") summary.inserted++;
-    else if (op.kind === "reinforce") summary.reinforced++;
-    else summary.skipped++;
-    await applyUpsertOp(db, op, "extract-ideas");
-  }
-  console.log(JSON.stringify(summary, null, 2));
+  const result = await runExtraction(candidates, {
+    findByHash: (hash) => findIdeaByHash(db, hash),
+    apply: (op) => applyUpsertOp(db, op, "extract-ideas"),
+  });
+  console.log(JSON.stringify({ ...scanned, ...result }, null, 2));
 } finally {
   await client.close();
 }
