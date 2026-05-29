@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dirkknibbe.morning-brief.extract</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dirkknibbe/morning-brief/scripts/run-extract.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dirkknibbe/morning-brief</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>12</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-extract.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-extract.err</string>
+</dict>
+</plist>
