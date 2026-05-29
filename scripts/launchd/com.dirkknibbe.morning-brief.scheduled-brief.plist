@@ -18,13 +18,13 @@
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>1</integer>
+        <integer>6</integer>
         <key>Minute</key>
-        <integer>28</integer>
+        <integer>0</integer>
     </dict>
 
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>StandardOutPath</key>
     <string>/Users/dirkknibbe/morning-brief/logs/launchd-scheduled-brief.out</string>
