@@ -3,6 +3,9 @@ import {
   expectedFactoryWorktree,
   assertInFactoryWorktree,
   WrongWorktreeError,
+  expectedBuildDir,
+  assertInBuildDir,
+  WrongBuildDirError,
 } from "../factory-guard";
 
 test("expectedFactoryWorktree: composes repoRoot/.claude/worktrees/factory/<slug>", () => {
@@ -53,4 +56,35 @@ test("assertInFactoryWorktree: normalizes trailing slash on cwd", () => {
   expect(() =>
     assertInFactoryWorktree("mcp-auth", "/repo", "/repo/.claude/worktrees/factory/mcp-auth/"),
   ).not.toThrow();
+});
+
+test("expectedBuildDir: composes repoRoot/.claude/builds/<slug>", () => {
+  expect(expectedBuildDir("uipe-skill", "/repo")).toBe("/repo/.claude/builds/uipe-skill");
+});
+
+test("assertInBuildDir: silent when cwd matches", () => {
+  expect(() =>
+    assertInBuildDir("uipe-skill", "/repo", "/repo/.claude/builds/uipe-skill"),
+  ).not.toThrow();
+});
+
+test("assertInBuildDir: throws WrongBuildDirError when cwd is the repo root", () => {
+  expect(() => assertInBuildDir("uipe-skill", "/repo", "/repo")).toThrow(WrongBuildDirError);
+});
+
+test("assertInBuildDir: throws when cwd is a different idea's build dir", () => {
+  expect(() =>
+    assertInBuildDir("uipe-skill", "/repo", "/repo/.claude/builds/other"),
+  ).toThrow(WrongBuildDirError);
+});
+
+test("WrongBuildDirError carries expected and actual paths", () => {
+  try {
+    assertInBuildDir("uipe-skill", "/repo", "/somewhere/else");
+    throw new Error("should have thrown");
+  } catch (e) {
+    expect(e).toBeInstanceOf(WrongBuildDirError);
+    expect((e as WrongBuildDirError).expected).toBe("/repo/.claude/builds/uipe-skill");
+    expect((e as WrongBuildDirError).actual).toBe("/somewhere/else");
+  }
 });

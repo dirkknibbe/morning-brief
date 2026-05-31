@@ -12,6 +12,7 @@
     "extract-ideas": "bun run src/extract-ideas.ts",
     "ideas": "bun run src/ideas-state.ts",
     "system-state": "bun run src/system-state.ts",
+    "factory": "bun run src/factory.ts",
     "init-db": "bun run scripts/init-db.ts",
     "verify-validator": "bun run scripts/verify-ideas-validator.ts",
     "test": "bun test"
