@@ -19,6 +19,7 @@ export interface LockState {
   idea_slug: string;
   started_at: Date;
   pid: number;
+  pgid: number;
 }
 
 export interface LockResult {
@@ -32,6 +33,7 @@ export async function acquireLock(
   ideaSlug: string,
   ttlMs: number,
   pid: number = process.pid,
+  pgid: number = pid,
 ): Promise<LockResult> {
   const now = new Date();
 
@@ -43,6 +45,7 @@ export async function acquireLock(
       started_at: now,
       ttl_ms: ttlMs,
       pid,
+      pgid,
     });
     return { acquired: true, prior_owner: null, takeover: false };
   } catch (e: any) {
@@ -62,6 +65,7 @@ export async function acquireLock(
     idea_slug: existing.idea_slug,
     started_at: existing.started_at,
     pid: existing.pid,
+    pgid: existing.pgid,
   };
 
   const cutoff = new Date(now.getTime() - (existing.ttl_ms ?? ttlMs));
@@ -76,6 +80,7 @@ export async function acquireLock(
         started_at: now,
         ttl_ms: ttlMs,
         pid,
+        pgid,
       },
     },
     { returnDocument: "before" },
@@ -106,5 +111,6 @@ export async function checkLock(db: Db): Promise<LockState | null> {
     idea_slug: doc.idea_slug,
     started_at: doc.started_at,
     pid: doc.pid,
+    pgid: doc.pgid,
   };
 }
