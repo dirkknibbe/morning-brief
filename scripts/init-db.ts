@@ -108,7 +108,7 @@ try {
 
   // Ensure collections exist (createCollection is idempotent if we catch
   // the "already exists" error).
-  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state", "factory_lock"];
+  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state", "factory_lock", "factory_runs"];
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(
       (c) => c.name
@@ -157,6 +157,10 @@ try {
     validationAction: "error",
   });
   console.log("✓ ideas validator (error action, moderate level)");
+
+  await db.collection("factory_runs").createIndex({ idea_slug: 1 });
+  await db.collection("factory_runs").createIndex({ started_at: -1 });
+  console.log("✓ factory_runs indexes");
 
   await db.collection("audit_log").createIndex({ slug: 1, ts: -1 });
   await db.collection("audit_log").createIndex({ ts: -1 });

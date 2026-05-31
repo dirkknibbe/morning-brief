@@ -44,3 +44,30 @@ export function assertInFactoryWorktree(
     throw new WrongWorktreeError(expectedClean, actual, ideaSlug);
   }
 }
+
+export class WrongBuildDirError extends Error {
+  constructor(
+    public readonly expected: string,
+    public readonly actual: string,
+    public readonly ideaSlug: string,
+  ) {
+    super(`Factory must run in ${expected} for idea "${ideaSlug}", but cwd is ${actual}.`);
+    this.name = "WrongBuildDirError";
+  }
+}
+
+export function expectedBuildDir(ideaSlug: string, repoRoot: string): string {
+  return join(repoRoot, ".claude", "builds", ideaSlug);
+}
+
+export function assertInBuildDir(
+  ideaSlug: string,
+  repoRoot: string,
+  cwd: string = process.cwd(),
+): void {
+  const expected = stripTrailingSlash(expectedBuildDir(ideaSlug, repoRoot));
+  const actual = stripTrailingSlash(cwd);
+  if (actual !== expected) {
+    throw new WrongBuildDirError(expected, actual, ideaSlug);
+  }
+}

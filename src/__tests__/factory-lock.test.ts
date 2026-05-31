@@ -32,10 +32,14 @@ afterEach(async () => {
 });
 
 testIf("acquireLock: free → acquired with prior_owner=null and takeover=false", async () => {
-  const result = await acquireLock(db, "__test_idea_1", 60_000, 12345);
+  const result = await acquireLock(db, "__test_idea_1", 60_000, 4242, 4243);
   expect(result.acquired).toBe(true);
   expect(result.prior_owner).toBeNull();
   expect(result.takeover).toBe(false);
+  // pgid round-trips through the stored document
+  const state = await checkLock(db);
+  expect(state?.pid).toBe(4242);
+  expect(state?.pgid).toBe(4243);
 });
 
 testIf("acquireLock: held by fresh owner → not acquired, prior_owner present, takeover=false", async () => {
