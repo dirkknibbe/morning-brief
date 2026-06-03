@@ -12,7 +12,7 @@
  *   lock-check                                            -> LockState | "null"
  *   run-create   --slug S --build-dir D --branch B --classification-json '[...]' -> runId
  *   run-append   --id ID --n N --failing F --hypothesis H --excerpt E
- *   run-finalize --id ID --terminator T [--repo-url U --cost-usd C --tokens K --duration-s D]
+ *   run-finalize --id ID --terminator T [--branch B --repo-url U --cost-usd C --tokens K --duration-s D]
  */
 import { MongoClient } from "mongodb";
 import { classifyAll } from "./criteria-classify";
@@ -111,17 +111,20 @@ async function main() {
         );
         console.log("appended");
         break;
-      case "run-finalize":
-        await finalizeRun(db, args["id"], {
+      case "run-finalize": {
+        const fields: any = {
           terminator: args["terminator"] as Terminator,
           ended_at: new Date(),
           repo_url: args["repo-url"] ?? null,
           cost_usd: args["cost-usd"] ? Number(args["cost-usd"]) : null,
           tokens: args["tokens"] ? Number(args["tokens"]) : null,
           duration_s: args["duration-s"] ? Number(args["duration-s"]) : null,
-        });
+        };
+        if (args["branch"]) fields.branch = args["branch"];
+        await finalizeRun(db, args["id"], fields);
         console.log("finalized");
         break;
+      }
       default:
         console.error(`factory: unknown subcommand "${sub}"`);
         process.exit(2);
