@@ -43,4 +43,14 @@ perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec: $!"' -- \
   /usr/bin/env IDEA_SLUG="$SLUG" SKIP_DEDUPE=1 MAX_BUDGET_USD=20 \
   ./scripts/run-trigger.sh triggers/factory.md >>"$LOG" 2>&1 &
 
-echo "started factory for $SLUG (log: $LOG)"
+# Record the group-leader pid for the trigger to use as the lock's pgid. The
+# backgrounded perl calls setsid() then exec's IN PLACE, so $! is the new
+# session/group leader's pid (== its pgid). The factory trigger can't compute
+# this itself: Claude Code's Bash tool runs each command in its OWN ephemeral
+# process group, so `ps -o pgid= -p $$` inside the trigger returns the wrong
+# group. factory.md Step 0 reads this file so /abort kills the real group.
+LEADER_PGID=$!
+PGID_FILE="/tmp/morning-brief-factory.pgid"
+echo "$LEADER_PGID" > "$PGID_FILE"
+
+echo "started factory for $SLUG (log: $LOG, pgid: $LEADER_PGID)"

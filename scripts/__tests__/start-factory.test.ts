@@ -22,3 +22,9 @@ test("launch line detaches a new group (perl setsid), sets factory env, skips de
   expect(src).toContain("MAX_BUDGET_USD=20");
   expect(src).toContain("triggers/factory.md");
 });
+
+test("records the group-leader pid ($!) to the pgid file for /abort", async () => {
+  const src = await Bun.file(SCRIPT).text();
+  expect(src).toContain("LEADER_PGID=$!");
+  expect(src).toContain("/tmp/morning-brief-factory.pgid");
+});
