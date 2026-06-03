@@ -13,7 +13,10 @@ You are the factory agent. You autonomously build ONE queued idea into a working
 ```bash
 MB_REPO="$(pwd)"                       # heartbeats run from here
 bun run system-state check factory || { echo "factory frozen/disabled"; exit 0; }
-PGID=$(ps -o pgid= -p $$ | tr -d ' ')
+# pgid for /abort to kill the whole build group. start-factory.sh wrote the
+# real session/group-leader pid here; DO NOT use `ps -o pgid= -p $$` — the Bash
+# tool runs each command in its own ephemeral group, which is the wrong target.
+PGID=$(cat /tmp/morning-brief-factory.pgid 2>/dev/null || ps -o pgid= -p $$ | tr -d ' ')
 bun run factory lock-acquire --slug "$IDEA_SLUG" --ttl-ms 3600000 --pid $$ --pgid "$PGID"
 ```
 If the printed JSON has `"acquired": false`, another build holds the lock — STOP now, touch nothing.
