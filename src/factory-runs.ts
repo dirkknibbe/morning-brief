@@ -83,6 +83,7 @@ export interface FinalizeFields {
   cost_usd?: number | null;
   tokens?: number | null;
   duration_s?: number | null;
+  rounds?: number;
 }
 
 export async function createRun(db: Db, doc: RunDoc): Promise<string> {
@@ -101,5 +102,17 @@ export async function finalizeRun(db: Db, runId: string, fields: FinalizeFields)
   await db.collection("factory_runs").updateOne(
     { _id: new ObjectId(runId) },
     { $set: fields as any },
+  );
+}
+
+/**
+ * Finalize the open run for an idea (terminator still null) as aborted. Used by
+ * the listener's /abort, which knows the slug from the lock but not the run id.
+ * One build at a time, so there is at most one open run per slug.
+ */
+export async function abortOpenRun(db: Db, ideaSlug: string, now: Date = new Date()): Promise<void> {
+  await db.collection("factory_runs").updateOne(
+    { idea_slug: ideaSlug, terminator: null },
+    { $set: { terminator: "aborted", ended_at: now } },
   );
 }

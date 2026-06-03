@@ -34,7 +34,10 @@ if [ -n "$LOCK" ] && [ "$LOCK" != "null" ]; then
 fi
 
 mkdir -p logs
-LOG="logs/factory-${SLUG}-$(date +%Y-%m-%d).log"
+# Same per-day STEM log run-trigger.sh writes to (STEM=factory), so the build's
+# real output and any pre-trigger output land in one findable file. (A per-slug
+# log would be empty: run-trigger.sh wraps everything in its own redirect.)
+LOG="logs/factory-$(date +%Y-%m-%d).log"
 
 # Detach into a new session+process group (perl POSIX::setsid; macOS has no
 # setsid). The exec'd group leader's pid becomes the pgid the factory records
