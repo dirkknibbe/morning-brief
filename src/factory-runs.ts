@@ -78,6 +78,7 @@ export function buildRoundEntry(
 export interface FinalizeFields {
   terminator: Terminator;
   ended_at: Date;
+  branch?: string;
   repo_url?: string | null;
   cost_usd?: number | null;
   tokens?: number | null;
