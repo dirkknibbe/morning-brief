@@ -12,7 +12,8 @@
  *   lock-check                                            -> LockState | "null"
  *   run-create   --slug S --build-dir D --branch B --classification-json '[...]' -> runId
  *   run-append   --id ID --n N --failing F --hypothesis H --excerpt E
- *   run-finalize --id ID --terminator T [--branch B --repo-url U --cost-usd C --tokens K --duration-s D]
+ *   run-finalize --id ID --terminator T [--branch B --repo-url U --cost-usd C --tokens K --duration-s D --rounds N]
+ *   run-abort    --slug S                                (finalize the open run as aborted)
  */
 import { MongoClient } from "mongodb";
 import { classifyAll } from "./criteria-classify";
@@ -25,6 +26,7 @@ import {
   createRun,
   appendRound,
   finalizeRun,
+  abortOpenRun,
   type Terminator,
 } from "./factory-runs";
 
@@ -121,10 +123,15 @@ async function main() {
           duration_s: args["duration-s"] ? Number(args["duration-s"]) : null,
         };
         if (args["branch"]) fields.branch = args["branch"];
+        if (args["rounds"]) fields.rounds = Number(args["rounds"]);
         await finalizeRun(db, args["id"], fields);
         console.log("finalized");
         break;
       }
+      case "run-abort":
+        await abortOpenRun(db, args["slug"]);
+        console.log("aborted-run");
+        break;
       default:
         console.error(`factory: unknown subcommand "${sub}"`);
         process.exit(2);
