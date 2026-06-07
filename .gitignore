@@ -9,3 +9,7 @@ reference/morning-brief-files.zip
 data/
 
 logs/
+
+# factory + git-worktree runtime artifacts (regenerable, not tracked)
+.claude/worktrees/
+.claude/builds/

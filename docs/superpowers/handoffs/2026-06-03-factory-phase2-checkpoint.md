@@ -1,5 +1,7 @@
 # Morning-Brief — Phase 2 Factory Checkpoint
 
+> ✅ **RESOLVED 2026-06-07** — all 3 LOWs landed via PR #8; factory validated end-to-end (throwaway dry-run: `rounds=1`, `terminator=done`, torn down clean). The "Atlas blocker" below was a **misdiagnosis**: not cert/DNS drift but a **Bun 1.3.11 TLS SAN-parsing bug**, fixed by `bun upgrade` → 1.3.14 (`mongosh`/`openssl` validated fine throughout). This checkpoint is closed; kept for history.
+
 **Date:** 2026-06-03
 **Status:** Factory BUILT + VALIDATED end-to-end. 3 LOW follow-up fixes coded + committed, blocked on Atlas reachability.
 
