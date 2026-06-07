@@ -81,9 +81,11 @@ printf '%s' "✅ built $IDEA_SLUG — all machine criteria pass
 cd "$MB_REPO"
 bun run factory lock-release --slug "$IDEA_SLUG"
 bun run ideas set-status "$IDEA_SLUG" built
-bun run factory run-finalize --id "$RUN_ID" --terminator done --branch main --repo-url "<url>" --duration-s $DURATION_S
+bun run factory run-finalize --id "$RUN_ID" --terminator done --branch main --repo-url "<url>" --duration-s $DURATION_S --rounds $round
 ```
 
-**capped** / **stuck**: write `learnings.md` (rounds, hypotheses tried, dead-ends), commit, `git push -u origin HEAD:$IDEA_SLUG-capped` (or `-stuck`). Telegram the status + "see learnings.md". Then from `$MB_REPO`: `lock-release`; `bun run ideas set-status "$IDEA_SLUG" parked`; `run-finalize --terminator capped --branch "$IDEA_SLUG-capped"` (or `--terminator stuck --branch "$IDEA_SLUG-stuck"`) `--duration-s $DURATION_S`.
+(Always pass `--rounds $round` on every `run-finalize` so the run records how many rounds it took, even when the first suite check is already green.)
 
-**scope-break**: do NOT push a branch. Record the blocker. Telegram "🚧 $IDEA_SLUG needs you: <blocker>". From `$MB_REPO`: `lock-release`; `bun run ideas set-status "$IDEA_SLUG" needs_human`; `run-finalize --terminator scope-break --duration-s $DURATION_S`.
+**capped** / **stuck**: write `learnings.md` (rounds, hypotheses tried, dead-ends), commit, `git push -u origin HEAD:$IDEA_SLUG-capped` (or `-stuck`). Telegram the status + "see learnings.md". Then from `$MB_REPO`: `lock-release`; `bun run ideas set-status "$IDEA_SLUG" parked`; `run-finalize --terminator capped --branch "$IDEA_SLUG-capped"` (or `--terminator stuck --branch "$IDEA_SLUG-stuck"`) `--duration-s $DURATION_S --rounds $round`.
+
+**scope-break**: do NOT push a branch. Record the blocker. Telegram "🚧 $IDEA_SLUG needs you: <blocker>". From `$MB_REPO`: `lock-release`; `bun run ideas set-status "$IDEA_SLUG" needs_human`; `run-finalize --terminator scope-break --duration-s $DURATION_S --rounds $round`.
