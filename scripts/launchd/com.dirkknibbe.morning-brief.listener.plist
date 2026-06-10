@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dirkknibbe.morning-brief.listener</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dirkknibbe/morning-brief/scripts/run-listener.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dirkknibbe/morning-brief</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-listener.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dirkknibbe/morning-brief/logs/launchd-listener.err</string>
+</dict>
+</plist>
