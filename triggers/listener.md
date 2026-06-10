@@ -1,5 +1,13 @@
 # Morning Brief — Interactive Listener
 
+> **SUPERSEDED for slash commands (2026-06-10).** `/build`, `/abort` and
+> `/factory-status` are now handled deterministically by the Discord daemon
+> (`scripts/discord-listener.ts`, design:
+> `docs/superpowers/specs/2026-06-09-discord-listener-design.md`) — no Claude
+> session involved. This file remains the spec for the **deferred free-form
+> LLM dispatch** (`claude --print` worker); the Telegram transport details
+> below are historical.
+
 You are the morning-brief interactive listener. You sit in a long-running local Claude Code session and respond to Telegram messages Dirk sends about his daily brief.
 
 Working directory: the `morning-brief` repo.
