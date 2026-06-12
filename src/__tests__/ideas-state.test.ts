@@ -1,5 +1,10 @@
 import { test, expect } from "bun:test";
-import { isSynthesisEligible, buildSynthesisDoc, validateTriagePayload } from "../ideas-state";
+import {
+  isSynthesisEligible,
+  buildSynthesisDoc,
+  validateTriagePayload,
+  type SynthesisParent,
+} from "../ideas-state";
 
 test("isSynthesisEligible accepts extracted/queued/parked with signal_strength >= 1 and synthesis_depth <= 1", () => {
   const base = { signal_strength: 1, synthesis_depth: 0, status: "extracted" as const };
@@ -131,6 +136,39 @@ test("buildSynthesisDoc throws if synthesis_depth would exceed 2", () => {
       rawText: "rt",
     }),
   ).toThrow(/depth/);
+});
+
+// library_refs provenance tests
+
+const refParent = (slug: string): SynthesisParent => ({
+  slug,
+  signal_strength: 1,
+  synthesis_depth: 0,
+  theme_hints: [],
+  status: "extracted",
+});
+
+test("buildSynthesisDoc defaults library_refs to []", () => {
+  const doc = buildSynthesisDoc({
+    title: "test synthesis",
+    thesis: "a thesis",
+    parents: [refParent("a"), refParent("b")],
+    now: new Date("2026-06-12T00:00:00Z"),
+    rawText: "raw",
+  });
+  expect(doc.library_refs).toEqual([]);
+});
+
+test("buildSynthesisDoc carries provided library refs", () => {
+  const doc = buildSynthesisDoc({
+    title: "test synthesis",
+    thesis: "a thesis",
+    parents: [refParent("a"), refParent("b")],
+    now: new Date("2026-06-12T00:00:00Z"),
+    rawText: "raw",
+    libraryRefs: ["withlore-ai-gateway"],
+  });
+  expect(doc.library_refs).toEqual(["withlore-ai-gateway"]);
 });
 
 // validateTriagePayload tests
