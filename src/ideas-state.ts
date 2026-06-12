@@ -29,6 +29,7 @@ import { recordTransition } from "./audit";
 import { embed } from "./embeddings";
 import { findMidBandClusters, type ClusterItem } from "./cluster-ideas";
 import { slugify } from "./dedupe-ideas";
+import { parseFlagArgs } from "./cli-args";
 import { createHash } from "node:crypto";
 
 export function isSynthesisEligible(idea: {
@@ -287,24 +288,6 @@ export function validateTriagePayload(p: TriagePayload): void {
   if (!p.prior_art || typeof p.prior_art.twist !== "string" || p.prior_art.twist.trim().length === 0) {
     throw new Error("prior_art.twist must be a non-empty string");
   }
-}
-
-function parseFlagArgs(argv: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      const val = argv[i + 1];
-      if (val && !val.startsWith("--")) {
-        out[key] = val;
-        i++;
-      } else {
-        out[key] = "true";
-      }
-    }
-  }
-  return out;
 }
 
 // CLI

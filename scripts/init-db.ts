@@ -92,6 +92,39 @@ const IDEAS_VALIDATOR = {
   },
 };
 
+const LIBRARY_VALIDATOR = {
+  $jsonSchema: {
+    bsonType: "object",
+    required: [
+      "slug",
+      "title",
+      "summary",
+      "tags",
+      "sources",
+      "path",
+      "embedding",
+      "first_read",
+      "last_updated",
+      "runs",
+      "schema_version",
+    ],
+    properties: {
+      slug: { bsonType: "string", minLength: 1 },
+      title: { bsonType: "string", minLength: 1 },
+      summary: { bsonType: "string", minLength: 1 },
+      tags: { bsonType: "array" },
+      sources: { bsonType: "array" },
+      path: { bsonType: "string", minLength: 1 },
+      embedding: { bsonType: "array", minItems: 384, maxItems: 384 },
+      first_read: { bsonType: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+      last_updated: { bsonType: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+      runs: { bsonType: "array" },
+      schema_version: { bsonType: ["int", "long", "double"] },
+      indexed_at: { bsonType: "date" },
+    },
+  },
+};
+
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB ?? "morning-brief";
 
@@ -108,7 +141,7 @@ try {
 
   // Ensure collections exist (createCollection is idempotent if we catch
   // the "already exists" error).
-  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state", "factory_lock", "factory_runs"];
+  const collections = ["seen_items", "signals", "preferences", "ideas", "audit_log", "system_state", "factory_lock", "factory_runs", "library"];
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(
       (c) => c.name
@@ -157,6 +190,17 @@ try {
     validationAction: "error",
   });
   console.log("✓ ideas validator (error action, moderate level)");
+
+  await db.collection("library").createIndex({ slug: 1 }, { unique: true });
+  console.log("✓ library indexes");
+
+  await db.command({
+    collMod: "library",
+    validator: LIBRARY_VALIDATOR,
+    validationLevel: "moderate",
+    validationAction: "error",
+  });
+  console.log("✓ library validator (error action, moderate level)");
 
   await db.collection("factory_runs").createIndex({ idea_slug: 1 });
   await db.collection("factory_runs").createIndex({ started_at: -1 });
