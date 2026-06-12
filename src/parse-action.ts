@@ -1,11 +1,14 @@
 /**
- * parse-action.ts — extract the "Action for today" section from the latest brief.
+ * parse-action.ts — extract the "Action today" block from the latest brief.
  *
  * Usage: bun run src/parse-action.ts [YYYY-MM-DD]
  *
- * Prints JSON: { date, briefPath, action } where `action` is the
- * text after the "Action for today:" marker up to the next blank line
- * or end-of-file. Exits 1 if no action block is found.
+ * Prints JSON: { date, briefPath, action }. A marker line must start at
+ * line start (emoji/symbol prefixes allowed), contain a bold span whose
+ * text contains the word "action" (case-insensitive), and have a colon
+ * inside the bold or immediately after it. `action` is the rest of that
+ * line plus following lines up to the first blank line. Exits 1 if no
+ * marker line is found.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -17,6 +20,42 @@ export interface ParsedAction {
   action: string;
 }
 
+/**
+ * A marker line must:
+ *   - start at line start (optional emoji/symbol prefixes allowed, e.g. "🎯 "),
+ *   - contain a bold span (*...* or **...**) whose text contains the word
+ *     "action" (case-insensitive), and
+ *   - have a colon inside the bold or immediately after it.
+ * The action text is the remainder of that line plus following lines up to
+ * the first blank line. Mid-paragraph *emphasis* can no longer match
+ * (2026-06-05 garbage-capture bug). A bullet-style "* " (asterisk + space)
+ * cannot open the bold span — the opener requires a non-space after it.
+ */
+const MARKER =
+  /^[^\S\n]*(?:[^\w\s*][^\S\n]*)*\*{1,2}(?!\s)([^*\n]*)\*{1,2}[^\S\n]*(:?)/i;
+
+export function parseActionFromBody(body: string, briefPath: string): string {
+  const lines = body.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(MARKER);
+    if (!m) continue;
+    const boldInner = m[1];
+    const hasAction = /\baction\b/i.test(boldInner);
+    const hasColon = boldInner.includes(":") || m[2] === ":";
+    if (!hasAction || !hasColon) continue;
+
+    const sameLine = lines[i].slice(m[0].length).replace(/^:/, "").trim();
+    const rest: string[] = sameLine ? [sameLine] : [];
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === "") break;
+      rest.push(lines[j]);
+    }
+    const action = rest.join("\n").trim();
+    if (action) return action;
+  }
+  throw new Error(`No "Action today" block in ${briefPath}`);
+}
+
 export function parseAction(date: string, briefsDir = "briefs"): ParsedAction {
   const candidates = [
     join(briefsDir, `${date}-rerun.md`),
@@ -26,15 +65,7 @@ export function parseAction(date: string, briefsDir = "briefs"): ParsedAction {
   if (!briefPath) throw new Error(`No brief found for ${date} (tried ${candidates.join(", ")})`);
 
   const body = readFileSync(briefPath, "utf8");
-
-  // Match any bold-wrapped line containing "Action" followed by a colon
-  // (inside or outside the asterisks) and the action text. Tolerates emoji
-  // prefixes, "Action for today" vs "Action item for today" etc.
-  const re = /\*{1,2}[^*\n]*\bAction\b[^*\n]*\*{1,2}\s*:?\s*([\s\S]+?)(?:\n\s*\n|$)/i;
-  const m = body.match(re);
-  if (!m) throw new Error(`No "Action for today" block in ${briefPath}`);
-
-  return { date, briefPath, action: m[1].trim() };
+  return { date, briefPath, action: parseActionFromBody(body, briefPath) };
 }
 
 if (import.meta.main) {
