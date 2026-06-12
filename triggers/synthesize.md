@@ -57,7 +57,7 @@ The CLI validates parent existence, computes `signal_strength`, `synthesis_depth
 
 ### 4. Done
 
-No Telegram ping. The triage stage that runs next will pick up new synthesis ideas and decide if any survives scoring. If 0 syntheses were inserted today, that's fine — log it and exit.
+No Discord ping. The triage stage that runs next will pick up new synthesis ideas and decide if any survives scoring. If 0 syntheses were inserted today, that's fine — log it and exit.
 
 ## Scope guardrails
 
