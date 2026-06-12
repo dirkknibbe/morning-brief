@@ -47,6 +47,7 @@ const IDEAS_VALIDATOR = {
       kind: { enum: ["simple", "synthesis"] },
       synthesis_depth: { bsonType: ["int", "long"], minimum: 0, maximum: 2 },
       parents: { bsonType: ["array", "null"] },
+      library_refs: { bsonType: ["array", "null"] },
       synthesis_thesis: { bsonType: ["string", "null"] },
       success_criteria: { bsonType: ["array", "null"] },
       prior_art: { bsonType: ["object", "null"] },

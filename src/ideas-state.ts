@@ -214,8 +214,9 @@ export function buildSynthesisDoc(args: {
   parents: SynthesisParent[];
   now: Date;
   rawText: string;
+  libraryRefs?: string[];
 }) {
-  const { title, thesis, parents, now, rawText } = args;
+  const { title, thesis, parents, now, rawText, libraryRefs } = args;
   if (parents.length < 2) {
     throw new Error("buildSynthesisDoc: at least 2 parents required");
   }
@@ -248,6 +249,7 @@ export function buildSynthesisDoc(args: {
     status: "extracted" as const,
     kind: "synthesis" as const,
     parents: parents.map((p) => p.slug),
+    library_refs: libraryRefs ?? [],
     synthesis_thesis: thesis,
     synthesis_depth: newDepth as 1 | 2,
     prior_art: null,
@@ -348,6 +350,37 @@ if (import.meta.main) {
         console.error("insert-synthesis: --title and --thesis are required");
         process.exit(1);
       }
+      const rawRefs = args["library-refs"];
+      if (rawRefs === "true") {
+        console.error("insert-synthesis: --library-refs needs a value (omit the flag when there are no refs)");
+        process.exit(1);
+      }
+      const libraryRefs = Array.from(
+        new Set(
+          (rawRefs ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      );
+      const badRefs = libraryRefs.filter((r) => !/^[a-z0-9-]+$/.test(r));
+      if (badRefs.length > 0) {
+        console.error("insert-synthesis: invalid --library-refs slug(s):", badRefs.join(", "));
+        process.exit(1);
+      }
+      if (libraryRefs.length > 0) {
+        const found = await db
+          .collection("library")
+          .find({ slug: { $in: libraryRefs } }, { projection: { slug: 1 } })
+          .toArray();
+        const foundSet = new Set(found.map((d) => d.slug));
+        const unknown = libraryRefs.filter((r) => !foundSet.has(r));
+        if (unknown.length > 0) {
+          console.error(
+            `insert-synthesis: warning — library ref(s) not in index (proceeding): ${unknown.join(", ")}`,
+          );
+        }
+      }
       const parents = await db
         .collection("ideas")
         .find({ slug: { $in: parentSlugs } })
@@ -364,6 +397,7 @@ if (import.meta.main) {
         parents: parents as any,
         now: new Date(),
         rawText,
+        libraryRefs,
       });
       await db.collection("ideas").insertOne(doc);
       try {
