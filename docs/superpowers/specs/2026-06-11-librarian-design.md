@@ -115,10 +115,11 @@ Mongo `library` collection (`$jsonSchema` via scripts/init-db.ts): unique `slug`
 ### `src/parse-action.ts` hardening (existing-code fix the loop depends on)
 
 `parse-action.ts:33`'s `/i` flag matches lowercase "today" in brief prose — on 2026-06-05 it
-captured mid-paragraph garbage and exited 0 (HIGH recurrence risk per gotchas). Fix both known
-holes: drop `/i` (the action marker is always title-case) and anchor the bold marker at line
-start (`m` flag + `^\s*\*`). Regression tests on the real 2026-06-05 false-match shape plus
-the `🎯 *Today's action:*` and `*Action today:*` live variants.
+captured mid-paragraph garbage and exited 0 (HIGH recurrence risk per gotchas). Fix: anchor the
+marker at line start (optional emoji prefix), require the word "action" inside the bold span,
+and require a colon in/after it. Case-insensitivity STAYS — the live `🎯 *Today's action:*`
+variant is lowercase, so the originally-floated "drop `/i`" would break real briefs. Regression
+tests on the real 2026-06-05 false-match shape plus both live marker variants.
 
 ### Trigger prompt edits
 
@@ -135,7 +136,7 @@ the `🎯 *Today's action:*` and `*Action today:*` live variants.
 
 ### `insert-synthesis --library-refs` (ideas CLI)
 
-Optional repeated flag. Slug format validated hard (`^[a-z0-9-]+$`); existence in the library
+Optional comma-separated flag (matches the `--parents` house style). Slug format validated hard (`^[a-z0-9-]+$`); existence in the library
 collection checked soft (warn, don't fail — refs are provenance, not foreign keys).
 **Must-verify during implementation:** the `ideas` collection `$jsonSchema` runs in error mode
 (the 2026-05-11 minLength gotcha) — confirm it tolerates the new optional `library_refs` field
