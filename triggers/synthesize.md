@@ -7,8 +7,10 @@ Today's date: current date in `YYYY-MM-DD`.
 
 ## Tools you will use
 
-- `Bash` — run `bun run ideas cluster-candidates` and `bun run ideas insert-synthesis ...`.
-- (No web fetches. Synthesize is internal-only.)
+- `Bash` — run `bun run ideas cluster-candidates`, `bun run library relevant ...`,
+  `cat library/<slug>.md`, and `bun run ideas insert-synthesis ...`.
+- (No web fetches. Synthesize is internal-only — the research library is local files
+  + our own Mongo, so reading it does not violate this.)
 
 ## Step-by-step
 
@@ -25,6 +27,21 @@ Output is a JSON array. Each element is `{ cluster_slugs: string[], ideas: { slu
 ### 2. Per-cluster judgment
 
 For each cluster:
+
+First, ground the cluster against the research library:
+
+```bash
+bun run library relevant --text "<the cluster's idea titles + first raw_text lines, joined with newlines>" --k 3
+```
+
+Strip backticks, double quotes, and `$` from the payload first — it's an embedding query; punctuation doesn't affect retrieval.
+
+Output: JSON array of `{ slug, title, path, score, summary }` (empty array = no
+library yet — fine). `score` is cosine similarity; ≥0.45 usually means worth a look,
+but judge by the summary. `cat` any entry that looks genuinely relevant and use it as
+grounding for the strictly-stronger judgment and the thesis. Track which entry slugs
+you ACTUALLY used. This is best-effort: if the command errors, proceed ungrounded
+exactly as before.
 
 Read all the `ideas` in the cluster. Then ask yourself:
 
@@ -50,8 +67,12 @@ bun run ideas insert-synthesis \
   --parents "<slug-a>,<slug-b>[,<slug-c>[,<slug-d>]]" \
   --title "<title>" \
   --thesis "<2-3 sentence thesis>" \
-  --raw-text "<paragraph summary>"
+  --raw-text "<paragraph summary>" \
+  [--library-refs "<entry-slug>[,<entry-slug>]"]
 ```
+
+Pass `--library-refs` only for entries whose content actually shaped the thesis —
+refs are provenance, not decoration.
 
 The CLI validates parent existence, computes `signal_strength`, `synthesis_depth`, and `theme_hints` automatically, and inserts the doc. If the CLI errors (e.g., a parent is `rejected`), skip and move on.
 
@@ -66,6 +87,7 @@ No Discord ping. The triage stage that runs next will pick up new synthesis idea
 - **No LLM scoring here.** Scoring happens in triage; synthesize is a candidate generator.
 - **No external fetches.** Synthesize is internal-only — it reasons over existing idea text.
 - **No status transitions.** Synthesize only *inserts* new ideas in `extracted` status. It does not promote, reject, or queue.
+- **Library grounding is optional input, never a gate.** A `library relevant` failure or an empty library must not block synthesis.
 
 ## Environment assumed available
 

@@ -15,6 +15,7 @@
     "register-commands": "bun run scripts/discord-register-commands.ts",
     "extract-ideas": "bun run src/extract-ideas.ts",
     "ideas": "bun run src/ideas-state.ts",
+    "library": "bun run src/library.ts",
     "system-state": "bun run src/system-state.ts",
     "factory": "bun run src/factory.ts",
     "init-db": "bun run scripts/init-db.ts",

@@ -25,7 +25,7 @@ If the printed JSON has `"acquired": false`, another build holds the lock — ST
 ```bash
 bun run ideas show "$IDEA_SLUG"
 ```
-Confirm `status` is `queued`. If not, run `bun run factory lock-release --slug "$IDEA_SLUG"` and STOP. Read `success_criteria`, `synthesis_thesis`, `title`, `sources`; read the brief/action files in `sources` for context. Then:
+Confirm `status` is `queued`. If not, run `bun run factory lock-release --slug "$IDEA_SLUG"` and STOP. Read `success_criteria`, `synthesis_thesis`, `title`, `sources`; read the brief/action files in `sources` for context. If the idea has a non-empty `library_refs`, also read each `library/<ref>.md` that exists — refs may be stale, skip missing files. This is distilled research that shaped this idea; let it inform scaffolding and plan choices. Then:
 ```bash
 bun run ideas set-status "$IDEA_SLUG" building
 ```
