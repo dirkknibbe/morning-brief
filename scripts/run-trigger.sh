@@ -7,6 +7,8 @@
 # Designed to be called from launchd or scripts/start-factory.sh. Sources the
 # repo's .env so TELEGRAM_*, MONGODB_URI, GITHUB_TOKEN etc. land in the Claude
 # Code session. Logs stdout+stderr to logs/<trigger-stem>-<date>.log.
+# Exits non-zero when the run fails — including API connection errors that
+# `claude --print` itself exits 0 on.
 #
 # Env knobs (both backward-compatible, default to the daily behavior):
 #   SKIP_DEDUPE=1     bypass the 21h dedupe guard (on-demand runs, e.g. factory)
@@ -29,6 +31,8 @@ STEM="$(basename "$TRIGGER" .md)"
 # trigger that already ran today. Skipped for on-demand runs (the factory) via
 # SKIP_DEDUPE=1; the factory_lock already enforces one-at-a-time there. 21h
 # (75600s) < 24h so consecutive daily 06:xx runs aren't blocked.
+# The marker is touched up front so a re-fire mid-run is still blocked, and
+# removed again after a failed run so failures don't block same-day retries.
 if [ "${SKIP_DEDUPE:-0}" != "1" ]; then
   LAST_RUN="/tmp/morning-brief-${STEM}-last-run"
   if [ -f "$LAST_RUN" ]; then
@@ -56,6 +60,9 @@ mkdir -p logs
 DATE="$(date +%Y-%m-%d)"
 LOG="logs/${STEM}-${DATE}.log"
 
+RUN_OUT="$(mktemp "${TMPDIR:-/tmp}/morning-brief-${STEM}-out.XXXXXX")"
+trap 'rm -f "$RUN_OUT"' EXIT
+
 {
   echo "=== $(date -Iseconds) starting $STEM ==="
   echo "cwd=$PWD"
@@ -63,12 +70,29 @@ LOG="logs/${STEM}-${DATE}.log"
 
   # Claude Code headless: pass the trigger file contents as the user prompt,
   # bypass permissions so it can run tools without prompting, and cap cost.
+  # tee streams the log live while capturing output for the failure check.
   claude \
     --print \
     --permission-mode bypassPermissions \
     --max-budget-usd "${MAX_BUDGET_USD:-5}" \
     "$(cat "$TRIGGER")" \
-    </dev/null
+    </dev/null 2>&1 | tee "$RUN_OUT"
+  STATUS="${PIPESTATUS[0]}"
 
-  echo "=== $(date -Iseconds) finished $STEM (exit $?) ==="
+  # claude --print exits 0 even when the API is unreachable (ConnectionRefused,
+  # socket closed mid-run) — the only failure signal is an "API Error:" line
+  # in its output.
+  if [ "$STATUS" -eq 0 ] && grep -q '^API Error:' "$RUN_OUT"; then
+    STATUS=1
+  fi
+
+  # Failed runs don't count toward the 21h dedupe. LAST_RUN is unset when
+  # SKIP_DEDUPE=1, so on-demand runs never touch the marker.
+  if [ "$STATUS" -ne 0 ] && [ -n "${LAST_RUN:-}" ]; then
+    echo "run failed; clearing dedupe marker so a retry isn't blocked"
+    rm -f "$LAST_RUN"
+  fi
+
+  echo "=== $(date -Iseconds) finished $STEM (exit $STATUS) ==="
+  exit "$STATUS"
 } >>"$LOG" 2>&1
