@@ -1,5 +1,11 @@
 # Stealth Source Reader — Design Spec
 
+> **⚠ SUPERSEDED IN PART (2026-08-20 evening).** The "no browser / static
+> `Fetcher`" premise below failed Task 1's live gate. Reddit now uses a Camoufox
+> `StealthySession` (HTML scrape); Anthropic uses plain Bun `fetch`. The plan is
+> the current source of truth: `../plans/2026-08-20-stealth-source-reader.md`
+> (+ `-TODO.md`). Read those before this file's "no browser" sections.
+
 **Date:** 2026-08-20
 **Status:** Approved design, pre-implementation
 **Base:** `origin/main` @ b6d017a (after PR #13)

@@ -1,54 +1,48 @@
 # Stealth Source Reader Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **⚠ REVISED 2026-08-20 (evening).** Task 1's live gate reversed the original
+> "no browser / static `Fetcher`" premise. This plan is the CURRENT source of
+> truth; where it conflicts with the spec, the plan wins. Rationale + empirical
+> matrix: `2026-08-20-stealth-source-reader-TODO.md`.
 
-**Goal:** Add a lightweight "stealthy GET" source tier that reads block-prone sources (Reddit and server-rendered blogs) past TLS/UA-fingerprint 403s without a browser, built on Scrapling's static `Fetcher`.
+**Goal:** Add a "stealthy GET" source tier that reads block-prone sources past TLS/UA-fingerprint 403s. **Reddit** is read by scraping its HTML through one Camoufox browser session (`StealthySession`); **Anthropic** blogs are read with a plain Bun `fetch` (server-rendered, no browser needed). All parsing, ID assignment, and health live in TypeScript and fold into the existing `fetchAllSources` pipeline + PR #13 health machinery.
 
-**Architecture:** A thin Python CLI (`scripts/stealth-fetch.py`) does stealthy GETs and returns raw bodies as JSON; all parsing, ID assignment, and health live in TypeScript (`src/stealth-source.ts`) and fold into the existing `fetchAllSources` pipeline and PR #13 health machinery.
+**Architecture (revised):**
 
-**Tech Stack:** Bun + TypeScript (existing), Python 3 + `scrapling[fetchers]` (new, no browser), Bun-native `HTMLRewriter` for HTML parsing (no new JS dep).
+```
+fetchAllSources (src/sources.ts)
+  ├── fetchHackerNews / fetchGitHub          ← unchanged (plain fetch, APIs)
+  ├── fetchStealth(REDDIT_TARGETS, {run})    ← reddit-html: browser via Python CLI
+  │        └── scripts/stealth-fetch.py  (one StealthySession for the whole batch)
+  │                 → [{url,status,body,error}] → parseRedditHtml → RawItem[] (source "reddit")
+  └── fetchStealth(BLOG_TARGETS,  {fetchFn}) ← html-list: plain Bun fetch
+           → parseHtmlList → RawItem[] (source "stealth")
+```
 
-**Spec:** `docs/superpowers/specs/2026-08-20-stealth-source-reader-design.md`
+Two separate `fetchStealth` calls keep Reddit and blog health **independent** — a dead browser must not be masked by healthy blogs, and vice-versa.
+
+**Tech Stack:** Bun + TypeScript (existing), Python 3 + `scrapling[fetchers]` + `scrapling install` (Camoufox browser — required), Bun-native `HTMLRewriter` for HTML parsing (no new JS dep).
+
+**Spec:** `docs/superpowers/specs/2026-08-20-stealth-source-reader-design.md` (static-Fetcher premise superseded — see banner above).
 
 ## Global Constraints
 
-- **No browser.** Static `Fetcher` only; no `scrapling install`, no Chromium/Lightpanda, no `StealthyFetcher`/`DynamicFetcher`.
-- **Python stays thin.** `stealth-fetch.py` does GET + JSON out, nothing else. No parsing in Python.
-- **Reuse existing shapes.** Produce `RawItem` (from `src/sources.ts`) and return `FetchResult` (`{items, status, note?}`); reuse `sourceStatus()` and `redditId()` from `src/sources.ts`. Do not duplicate them.
+- **Browser required.** Reddit needs Camoufox: `pip install "scrapling[fetchers]"` + `scrapling install` (both already done on this box). Anthropic does NOT — it uses plain `fetch`.
+- **One `StealthySession` per batch.** The Python CLI reuses ONE browser for all Reddit URLs — never a browser per URL (~8 subreddits × per-fetch launch would be intolerably slow). `StealthySession` is seconds-per-page; keep the subreddit count modest and give the spawn a generous timeout.
+- **Python stays thin.** `stealth-fetch.py` does browser GET + JSON out, nothing else. No parsing in Python.
+- **Reuse existing shapes.** Produce `RawItem`, return `FetchResult` (`{items, status, note?}`); reuse `sourceStatus()` and `redditId()` from `src/sources.ts`. Do not duplicate them.
 - **Immutability / project style.** New objects, no mutation of inputs; files < 400 lines; `camelCase` fns, `PascalCase` types.
-- **No Claude co-author trailer** on any commit.
+- **No Claude co-author trailer** on any commit. Commit types: `feat`/`refactor`/`docs`.
 - **Test runner:** `bun test`. **Typecheck:** `bunx tsc --noEmit` is ground truth.
+- **Work in the `feat/stealth-source-reader` worktree** at `/private/tmp/stealth-wt`. `cd` there for all `git`/`bun` commands.
 
 ---
 
-### Task 1: Verify gating assumptions (light install + Reddit-403 premise)
+### Task 1: Verify gating assumptions — ✅ DONE (see TODO)
 
-Both risky premises get checked before any code is built on them. This task writes no product code; its deliverable is a go/no-go note.
-
-**Files:**
-- None (verification only). Record findings in the PR description / commit message.
-
-- [ ] **Step 1: Install fetchers extra, no browser**
-
-```bash
-python3 -m pip install "scrapling[fetchers]"
-```
-
-- [ ] **Step 2: Confirm static Fetcher works WITHOUT a browser download**
-
-```bash
-python3 -c "from scrapling.fetchers import Fetcher; r = Fetcher.get('https://example.com', impersonate='chrome'); print('OK', r.status)"
-```
-Expected: `OK 200`. If it raises `ModuleNotFoundError` for a browser or demands `scrapling install`, STOP — the "no browser" premise is broken; report back before continuing.
-
-- [ ] **Step 3: Confirm `impersonate` clears the Reddit 403**
-
-```bash
-python3 -c "from scrapling.fetchers import Fetcher; r = Fetcher.get('https://old.reddit.com/r/LocalLLaMA/hot.json?limit=5', impersonate='chrome'); print('reddit', r.status)"
-```
-Expected: `reddit 200`. **If this is 403:** Reddit migration (Task 7) is dropped from scope — note it, and the plan ships with Anthropic as the only live stealth source. Everything else proceeds unchanged.
-
-- [ ] **Step 4: Record the outcome** (no commit needed; capture the two status codes for the PR body).
+Ran live. Static `Fetcher` fails Reddit (403 on both `.json` and HTML); `StealthySession.fetch` clears Reddit HTML (200, ~25 posts/page). Anthropic returns 200 server-rendered HTML on a plain GET. Premises resolved — no further gating probes. **Do not re-run.**
 
 ---
 
@@ -58,63 +52,78 @@ Expected: `reddit 200`. **If this is 403:** Reddit migration (Task 7) is dropped
 - Create: `scripts/stealth-fetch.py`
 
 **Interfaces:**
-- Produces (stdout contract, consumed by Task 5): a JSON array `[{"url": str, "status": int, "body": str, "error": str|null}]`. Reads newline-delimited URLs on stdin. Exits non-zero only on total failure (e.g. scrapling import fails).
+- Produces (stdout contract, consumed by Task 5): a JSON array `[{"url": str, "status": int, "body": str, "error": str|null}]`. Reads newline-delimited URLs on stdin. Uses ONE `StealthySession` for the whole batch. Exits non-zero only on total failure (scrapling import fails).
 
 - [ ] **Step 1: Write the script**
 
 ```python
 #!/usr/bin/env python3
-"""Thin stealthy GET. Reads URLs (one per line) on stdin, prints a JSON array
-of {url, status, body, error} on stdout. No parsing — that lives in TypeScript."""
+"""Thin stealthy browser GET. Reads URLs (one per line) on stdin, prints a JSON
+array of {url, status, body, error} on stdout. ONE StealthySession for the whole
+batch (browser reuse). No parsing — that lives in TypeScript."""
 import sys, json
 
 def main() -> int:
     try:
-        from scrapling.fetchers import Fetcher
+        from scrapling.fetchers import StealthySession
     except Exception as e:  # import/env failure = tool broken, not a per-URL error
         print(f"scrapling import failed: {e}", file=sys.stderr)
         return 1
+
     urls = [ln.strip() for ln in sys.stdin if ln.strip()]
     out = []
-    for url in urls:
-        try:
-            r = Fetcher.get(url, impersonate="chrome", stealthy_headers=True,
-                            timeout=30, retries=3)
-            out.append({"url": url, "status": r.status, "body": r.body, "error": None})
-        except Exception as e:
-            out.append({"url": url, "status": 0, "body": "", "error": str(e)})
+    try:
+        with StealthySession(headless=True) as s:
+            for url in urls:
+                try:
+                    p = s.fetch(url)
+                    body = p.body
+                    if isinstance(body, (bytes, bytearray)):  # StealthySession returns bytes
+                        body = body.decode("utf-8", "replace")
+                    out.append({"url": url, "status": int(p.status or 0),
+                                "body": body or "", "error": None})
+                except Exception as e:
+                    out.append({"url": url, "status": 0, "body": "", "error": str(e)})
+    except Exception as e:  # browser could not launch at all
+        print(f"StealthySession failed to start: {e}", file=sys.stderr)
+        return 1
+
     json.dump(out, sys.stdout)
     return 0
 
 if __name__ == "__main__":
     sys.exit(main())
 ```
-Note: `r.body` is Scrapling's raw response text. If the installed version exposes text differently (e.g. `r.text`), adjust here only — the TS contract is unaffected.
+Note: `p.body` is bytes under `StealthySession` (verified) — the `decode` guard is load-bearing. The TS contract is unaffected.
 
-- [ ] **Step 2: Smoke test against a live URL** (needs network + Task 1 install)
+- [ ] **Step 2: Smoke test against a live URL** — CONTROLLER-RUN ONLY.
 
+The controller (not a subagent) runs this; the browser + network + hooks make it unsuitable for a subagent. Expected: a subreddit page returns `200` with a body containing `data-fullname="t3_`.
 ```bash
-printf 'https://example.com\n' | python3 scripts/stealth-fetch.py | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['status'], len(d[0]['body']))"
+cd /private/tmp/stealth-wt
+printf 'https://old.reddit.com/r/LocalLLaMA/\n' | python3 scripts/stealth-fetch.py \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['status'], 'data-fullname' in d[0]['body'])"
 ```
-Expected: `200 <nonzero>`. Confirms the stdin→JSON contract.
+Expected: `200 True`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
+cd /private/tmp/stealth-wt
 git add scripts/stealth-fetch.py
-git commit -m "feat(stealth): thin Scrapling static-Fetcher CLI (stdin URLs -> JSON)"
+git commit -m "feat(stealth): thin Scrapling StealthySession CLI (stdin URLs -> JSON)"
 ```
 
 ---
 
-### Task 3: HTML list parser (`parseHtmlList`)
+### Task 3: HTML list parser (`parseHtmlList`) — for Anthropic
 
 **Files:**
 - Create: `src/stealth-source.ts`
 - Create: `src/__tests__/stealth-source.test.ts`
 
 **Interfaces:**
-- Produces (consumed by Task 5): `parseHtmlList(html: string, opts: { linkPrefix: string; origin: string }): Promise<Array<{ title: string; url: string }>>` — collects `<a href^=linkPrefix>` anchors, using anchor text as title, resolving `href` against `origin`, de-duped by URL. (Simplification of the spec's generic selectors: a link-prefix match covers the seed target — Anthropic's `/engineering/…` and `/news/…` article anchors — with far less config. Generalize to full selectors only if a later source needs it.)
+- Produces (consumed by Task 5): `parseHtmlList(html: string, opts: { linkPrefix: string; origin: string }): Promise<Array<{ title: string; url: string }>>` — collects `<a href^=linkPrefix>` anchors, using anchor text as title, resolving `href` against `origin`, de-duped by URL. Covers Anthropic's `/engineering/…` and `/news/…` article anchors.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -150,10 +159,7 @@ describe("parseHtmlList", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `bun test src/__tests__/stealth-source.test.ts`
-Expected: FAIL — `parseHtmlList` not exported.
+- [ ] **Step 2: Run test to verify it fails** — `bun test src/__tests__/stealth-source.test.ts` → FAIL (`parseHtmlList` not exported).
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -193,192 +199,253 @@ export async function parseHtmlList(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `bun test src/__tests__/stealth-source.test.ts`
-Expected: PASS (both tests).
+- [ ] **Step 4: Run test to verify it passes** — `bun test src/__tests__/stealth-source.test.ts` → PASS (both).
 
 - [ ] **Step 5: Commit**
 
 ```bash
+cd /private/tmp/stealth-wt
 git add src/stealth-source.ts src/__tests__/stealth-source.test.ts
 git commit -m "feat(stealth): HTMLRewriter-based prefix link-list parser"
 ```
 
 ---
 
-### Task 4: Extract the shared Reddit mapping (`mapRedditChild`)
+### Task 4: Reddit HTML parser (`parseRedditHtml`)
 
-Refactor the inline Reddit post→`RawItem` mapping in `src/sources.ts` into one shared pure function, so both the legacy path and the stealth path produce identical items.
+**Replaces the original plan's `mapRedditChild` (JSON).** Reddit `.json` is 403 even under the browser; we scrape the `old.reddit.com/r/<sub>/` HTML page instead. Every field lives in `data-*` attributes on `div.thing` (verified against the live page) — so this is near full-fidelity (only `selftext`/summary is lost, which the listing page doesn't carry).
 
-**Files:**
-- Modify: `src/sources.ts` (the two mapping blocks inside `fetchReddit`)
-- Modify: `src/__tests__/sources.test.ts` (add mapping test)
-
-**Interfaces:**
-- Produces (consumed by Task 5 and by `fetchReddit`): `mapRedditChild(child: any, fallbackSub: string): RawItem | null` — returns null when `child.data` is missing; otherwise maps the Reddit post to a `RawItem` using `redditId(post.id)`, `sourceLabel = \`reddit/r/${post.subreddit ?? fallbackSub}\``. Does NOT apply the `stickied` skip or dedupe (callers keep that).
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// add to src/__tests__/sources.test.ts
-import { mapRedditChild } from "../sources.ts";
-
-describe("mapRedditChild", () => {
-  test("maps a post to a RawItem with reddit id and permalink url", () => {
-    const item = mapRedditChild(
-      { data: { id: "abc", subreddit: "LocalLLaMA", title: "T", permalink: "/r/LocalLLaMA/comments/abc/t/", score: 9, num_comments: 3, selftext: "body", created_utc: 100 } },
-      "fallback",
-    );
-    expect(item).toEqual({
-      id: "reddit:abc",
-      source: "reddit",
-      sourceLabel: "reddit/r/LocalLLaMA",
-      title: "T",
-      url: "https://reddit.com/r/LocalLLaMA/comments/abc/t/",
-      score: 9,
-      comments: 3,
-      summary: "body",
-      timestamp: 100,
-    });
-  });
-
-  test("returns null when data is missing", () => {
-    expect(mapRedditChild({}, "x")).toBeNull();
-  });
-});
+Real structure (observed 2026-08-20):
+```html
+<div class=" thing id-t3_1voojjz linkflair odd stickied link self"
+     data-fullname="t3_1voojjz" data-subreddit="LocalLLaMA"
+     data-permalink="/r/LocalLLaMA/comments/1voojjz/megathread_.../"
+     data-timestamp="1786754473000" data-comments-count="391" data-score="490"
+     data-promoted="false" ...>
+  <a class="title may-blank" data-event-action="title"
+     href="/r/LocalLLaMA/comments/1voojjz/megathread_.../">Post Title Text</a>
+</div>
 ```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `bun test src/__tests__/sources.test.ts`
-Expected: FAIL — `mapRedditChild` not exported.
-
-- [ ] **Step 3: Add the function and route both existing loops through it**
-
-Add to `src/sources.ts` (near the Reddit section):
-
-```ts
-export function mapRedditChild(child: any, fallbackSub: string): RawItem | null {
-  const post = child?.data;
-  if (!post) return null;
-  return {
-    id: redditId(post.id),
-    source: "reddit",
-    sourceLabel: `reddit/r/${post.subreddit ?? fallbackSub}`,
-    title: post.title,
-    url: `https://reddit.com${post.permalink}`,
-    score: post.score,
-    comments: post.num_comments,
-    summary: post.selftext?.slice(0, 300) || undefined,
-    timestamp: post.created_utc,
-  };
-}
-```
-
-Then in `fetchReddit`, replace each inline `items.push({...})` block with:
-
-```ts
-for (const child of data?.data?.children ?? []) {
-  const post = child.data;
-  if (!post || post.stickied) continue;          // hot loop keeps the stickied skip
-  const item = mapRedditChild(child, sub);
-  if (!item || seen.has(item.id)) continue;
-  seen.add(item.id);
-  items.push(item);
-}
-```
-For the search loop, drop the `post.stickied` check (matches current behavior) and pass the loop's `sub` as fallback.
-
-- [ ] **Step 4: Run tests to verify pass (mapping + no Reddit regression)**
-
-Run: `bun test src/__tests__/sources.test.ts`
-Expected: PASS, including the existing `fetchReddit` 403 test.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/sources.ts src/__tests__/sources.test.ts
-git commit -m "refactor(sources): extract shared mapRedditChild mapping"
-```
-
----
-
-### Task 5: `fetchStealth` wrapper + config types
 
 **Files:**
 - Modify: `src/stealth-source.ts`
 - Modify: `src/__tests__/stealth-source.test.ts`
 
 **Interfaces:**
-- Consumes: `parseHtmlList` (Task 3), `mapRedditChild` (Task 4), `RawItem`/`FetchResult`/`sourceStatus` (from `src/sources.ts`).
-- Produces (consumed by Task 6):
-  - `interface StealthSpec { url: string; label: string; parse: "reddit-json" | "html-list"; linkPrefix?: string }`
-  - `type StealthRunner = (urls: string[]) => Promise<Array<{ url: string; status: number; body: string; error?: string | null }>>`
-  - `fetchStealth(specs: StealthSpec[], deps?: { run?: StealthRunner }): Promise<FetchResult>` — spawns the Python CLI by default; `deps.run` injects a fake in tests.
+- Produces (consumed by Task 5): `parseRedditHtml(html: string): Promise<RawItem[]>` — one `RawItem` per non-stickied, non-promoted `div.thing`. `id = redditId(dataFullname without "t3_")`; `title` from the `a[data-event-action="title"]` text; `url = "https://reddit.com" + data-permalink`; `sourceLabel = "reddit/r/" + data-subreddit`; `score`/`comments`/`timestamp` from `data-score`/`data-comments-count`/`data-timestamp` (timestamp is ms → floor to seconds). De-dupes by id within a page.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test** (add to `src/__tests__/stealth-source.test.ts`)
 
 ```ts
-import { fetchStealth, type StealthSpec } from "../stealth-source.ts";
+import { parseRedditHtml } from "../stealth-source.ts";
+
+describe("parseRedditHtml", () => {
+  const html = `
+    <div class=" thing id-t3_aaa odd link self" data-fullname="t3_aaa"
+         data-subreddit="LocalLLaMA" data-permalink="/r/LocalLLaMA/comments/aaa/first_post/"
+         data-timestamp="1786754473000" data-comments-count="12" data-score="42" data-promoted="false">
+      <a class="title may-blank" data-event-action="title"
+         href="/r/LocalLLaMA/comments/aaa/first_post/">First post</a>
+    </div>
+    <div class=" thing id-t3_bbb even link stickied self" data-fullname="t3_bbb"
+         data-subreddit="LocalLLaMA" data-permalink="/r/LocalLLaMA/comments/bbb/mega/"
+         data-timestamp="1786000000000" data-comments-count="99" data-score="500" data-promoted="false">
+      <a class="title may-blank" data-event-action="title"
+         href="/r/LocalLLaMA/comments/bbb/mega/">Sticky megathread</a>
+    </div>
+    <div class=" thing id-t3_ccc odd promotedlink" data-fullname="t3_ccc"
+         data-subreddit="ads" data-permalink="/r/ads/comments/ccc/ad/"
+         data-score="0" data-promoted="true">
+      <a class="title may-blank" data-event-action="title"
+         href="/r/ads/comments/ccc/ad/">An ad</a>
+    </div>`;
+
+  test("maps non-stickied non-promoted posts to full RawItems", async () => {
+    const out = await parseRedditHtml(html);
+    expect(out).toEqual([
+      {
+        id: "reddit:aaa",
+        source: "reddit",
+        sourceLabel: "reddit/r/LocalLLaMA",
+        title: "First post",
+        url: "https://reddit.com/r/LocalLLaMA/comments/aaa/first_post/",
+        score: 42,
+        comments: 12,
+        timestamp: 1786754473,
+      },
+    ]);
+  });
+
+  test("skips stickied and promoted posts", async () => {
+    const out = await parseRedditHtml(html);
+    expect(out.map((i) => i.id)).toEqual(["reddit:aaa"]);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails** — `bun test src/__tests__/stealth-source.test.ts` → FAIL (`parseRedditHtml` not exported).
+
+- [ ] **Step 3: Write the implementation** (add to `src/stealth-source.ts`; import `RawItem` + `redditId` from `./sources.ts`)
+
+```ts
+import { type RawItem, redditId } from "./sources.ts";
+
+const num = (v: string | null): number | undefined =>
+  v == null || v === "" ? undefined : Number(v);
+
+export async function parseRedditHtml(html: string): Promise<RawItem[]> {
+  const out: RawItem[] = [];
+  const seen = new Set<string>();
+  let cur:
+    | { fullname: string; permalink: string; sub: string; score?: number;
+        comments?: number; ts?: number; skip: boolean; title: string }
+    | null = null;
+
+  const rewriter = new HTMLRewriter()
+    .on('div.thing[data-fullname^="t3_"]', {
+      element(el) {
+        const cls = el.getAttribute("class") ?? "";
+        cur = {
+          fullname: el.getAttribute("data-fullname") ?? "",
+          permalink: el.getAttribute("data-permalink") ?? "",
+          sub: el.getAttribute("data-subreddit") ?? "",
+          score: num(el.getAttribute("data-score")),
+          comments: num(el.getAttribute("data-comments-count")),
+          ts: num(el.getAttribute("data-timestamp")),
+          skip: el.getAttribute("data-promoted") === "true" || /\bstickied\b/.test(cls),
+          title: "",
+        };
+        el.onEndTag(() => {
+          const c = cur;
+          cur = null;
+          if (!c || c.skip) return;
+          const id = redditId(c.fullname.replace(/^t3_/, ""));
+          const title = c.title.trim().replace(/\s+/g, " ");
+          if (!title || seen.has(id)) return;
+          seen.add(id);
+          out.push({
+            id,
+            source: "reddit",
+            sourceLabel: `reddit/r/${c.sub}`,
+            title,
+            url: `https://reddit.com${c.permalink}`,
+            score: c.score,
+            comments: c.comments,
+            timestamp: c.ts != null ? Math.floor(c.ts / 1000) : undefined,
+          });
+        });
+      },
+    })
+    .on('a[data-event-action="title"]', {
+      text(t) {
+        if (cur) cur.title += t.text;
+      },
+    });
+
+  await rewriter.transform(new Response(html)).text();
+  return out;
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes** — `bun test src/__tests__/stealth-source.test.ts` → PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd /private/tmp/stealth-wt
+git add src/stealth-source.ts src/__tests__/stealth-source.test.ts
+git commit -m "feat(stealth): old.reddit HTML post parser (data-* attrs)"
+```
+
+---
+
+### Task 5: `fetchStealth` wrapper + config types + `Source` union
+
+**Files:**
+- Modify: `src/stealth-source.ts`
+- Modify: `src/__tests__/stealth-source.test.ts`
+- Modify: `src/sources.ts` (extend `Source` union)
+
+**Interfaces:**
+- Consumes: `parseHtmlList` (T3), `parseRedditHtml` (T4), `RawItem`/`FetchResult`/`sourceStatus` (from `src/sources.ts`).
+- Produces (consumed by Task 6):
+  - `interface StealthSpec { url: string; label: string; parse: "reddit-html" | "html-list"; linkPrefix?: string }`
+  - `type StealthRunner = (urls: string[]) => Promise<Array<{ url: string; status: number; body: string; error?: string | null }>>`
+  - `fetchStealth(specs: StealthSpec[], deps?: { run?: StealthRunner; fetchFn?: typeof fetch }): Promise<FetchResult>` — `reddit-html` specs are fetched as ONE batch through `run` (Python browser CLI; default spawns it); `html-list` specs are fetched individually via `fetchFn` (plain Bun `fetch`, default `fetch`). Both parse into one combined `FetchResult`; callers pass homogeneous spec lists so each call's health is source-specific.
+
+- [ ] **Step 1: Write the failing test** (add to `src/__tests__/stealth-source.test.ts`)
+
+```ts
+import { fetchStealth, type StealthSpec, type StealthRunner } from "../stealth-source.ts";
 
 describe("fetchStealth", () => {
-  const specs: StealthSpec[] = [
-    { url: "https://old.reddit.com/r/LocalLLaMA/hot.json", label: "reddit/r/LocalLLaMA", parse: "reddit-json" },
+  const redditSpecs: StealthSpec[] = [
+    { url: "https://old.reddit.com/r/LocalLLaMA/", label: "reddit/r/LocalLLaMA", parse: "reddit-html" },
+  ];
+  const blogSpecs: StealthSpec[] = [
     { url: "https://www.anthropic.com/engineering", label: "anthropic/engineering", parse: "html-list", linkPrefix: "/engineering/" },
   ];
+  const redditBody = `<div class=" thing link" data-fullname="t3_z" data-subreddit="LocalLLaMA"
+      data-permalink="/r/LocalLLaMA/comments/z/x/" data-score="5" data-comments-count="1"
+      data-timestamp="1000" data-promoted="false">
+      <a data-event-action="title" href="/r/LocalLLaMA/comments/z/x/">Reddit post</a></div>`;
 
-  test("parses each source and reports ok health", async () => {
-    const run = async () => [
-      { url: specs[0].url, status: 200, body: JSON.stringify({ data: { children: [
-        { data: { id: "z", subreddit: "LocalLLaMA", title: "Reddit post", permalink: "/r/x/z/", score: 5, num_comments: 1, created_utc: 1 } },
-      ] } }) },
-      { url: specs[1].url, status: 200, body: `<a href="/engineering/harnesses"><h3>Harnesses</h3></a>` },
-    ];
-    const res = await fetchStealth(specs, { run });
+  test("reddit-html specs fetch via run() and parse posts", async () => {
+    const run: StealthRunner = async (urls) => urls.map((url) => ({ url, status: 200, body: redditBody, error: null }));
+    const res = await fetchStealth(redditSpecs, { run });
     expect(res.status).toBe("ok");
-    expect(res.items.map((i) => i.id)).toEqual(["reddit:z", expect.stringMatching(/^stealth:/)]);
+    expect(res.items.map((i) => i.id)).toEqual(["reddit:z"]);
+    expect(res.items[0].source).toBe("reddit");
+  });
+
+  test("html-list specs fetch via fetchFn and get stealth ids", async () => {
+    const fetchFn = (async () =>
+      new Response(`<a href="/engineering/harnesses"><h3>Harnesses</h3></a>`, { status: 200 })) as unknown as typeof fetch;
+    const res = await fetchStealth(blogSpecs, { fetchFn });
+    expect(res.status).toBe("ok");
+    expect(res.items[0].id).toMatch(/^stealth:/);
+    expect(res.items[0].source).toBe("stealth");
+    expect(res.items[0].sourceLabel).toBe("anthropic/engineering");
   });
 
   test("all-failed sources report failed, not empty", async () => {
-    const run = async () => specs.map((s) => ({ url: s.url, status: 403, body: "", error: "blocked" }));
-    const res = await fetchStealth(specs, { run });
+    const run: StealthRunner = async (urls) => urls.map((url) => ({ url, status: 403, body: "", error: "blocked" }));
+    const res = await fetchStealth(redditSpecs, { run });
     expect(res.status).toBe("failed");
     expect(res.items).toHaveLength(0);
   });
 
+  test("a thrown browser batch is failed with the error in note", async () => {
+    const run: StealthRunner = async () => { throw new Error("python3 not found"); };
+    const res = await fetchStealth(redditSpecs, { run });
+    expect(res.status).toBe("failed");
+    expect(res.note).toContain("python3 not found");
+  });
+
   test("partial failure keeps good items and notes the bad one", async () => {
-    const run = async () => [
-      { url: specs[0].url, status: 200, body: JSON.stringify({ data: { children: [] } }) },
-      { url: specs[1].url, status: 403, body: "", error: "blocked" },
-    ];
-    const res = await fetchStealth(specs, { run });
+    const specs = [...blogSpecs, { url: "https://www.anthropic.com/news", label: "anthropic/news", parse: "html-list", linkPrefix: "/news/" } as StealthSpec];
+    const fetchFn = (async (url: string) =>
+      url.includes("/news")
+        ? new Response("blocked", { status: 403 })
+        : new Response(`<a href="/engineering/x"><h3>X</h3></a>`, { status: 200 })) as unknown as typeof fetch;
+    const res = await fetchStealth(specs, { fetchFn });
+    expect(res.items).toHaveLength(1);
     expect(res.note).toContain("1/2");
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails** — `bun test src/__tests__/stealth-source.test.ts` → FAIL (`fetchStealth` not exported).
 
-Run: `bun test src/__tests__/stealth-source.test.ts`
-Expected: FAIL — `fetchStealth` not exported.
-
-- [ ] **Step 3: Implement the wrapper and default runner**
-
-Add to `src/stealth-source.ts` (import the shared pieces from `./sources.ts`):
+- [ ] **Step 3: Implement the wrapper + default browser runner** (add to `src/stealth-source.ts`; extend the `./sources.ts` import to also bring in `type FetchResult` and `sourceStatus`)
 
 ```ts
-import {
-  type RawItem,
-  type FetchResult,
-  sourceStatus,
-  mapRedditChild,
-} from "./sources.ts";
+import { type RawItem, type FetchResult, redditId, sourceStatus } from "./sources.ts";
 
 export interface StealthSpec {
   url: string;
   label: string;
-  parse: "reddit-json" | "html-list";
+  parse: "reddit-html" | "html-list";
   linkPrefix?: string;
 }
 
@@ -386,7 +453,7 @@ export type StealthRunner = (
   urls: string[],
 ) => Promise<Array<{ url: string; status: number; body: string; error?: string | null }>>;
 
-// Stable id for html-list items (no natural id like reddit has).
+// Stable id for html-list items (no natural id like reddit's fullname).
 const stealthId = (url: string) =>
   "stealth:" + new Bun.CryptoHasher("sha1").update(url).digest("hex").slice(0, 16);
 
@@ -395,6 +462,7 @@ async function spawnStealthCli(urls: string[]) {
     stdin: new TextEncoder().encode(urls.join("\n")),
     stdout: "pipe",
     stderr: "pipe",
+    cwd: import.meta.dir + "/..", // repo root, so the script path resolves regardless of caller cwd
   });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
@@ -402,52 +470,76 @@ async function spawnStealthCli(urls: string[]) {
     const err = await new Response(proc.stderr).text();
     throw new Error(`stealth-fetch.py exited ${code}: ${err.trim()}`);
   }
-  return JSON.parse(out);
+  return JSON.parse(out) as Awaited<ReturnType<StealthRunner>>;
 }
 
 export async function fetchStealth(
   specs: StealthSpec[],
-  deps: { run?: StealthRunner } = {},
+  deps: { run?: StealthRunner; fetchFn?: typeof fetch } = {},
 ): Promise<FetchResult> {
-  const run = deps.run ?? spawnStealthCli;
-  let results: Awaited<ReturnType<StealthRunner>>;
-  try {
-    results = await run(specs.map((s) => s.url));
-  } catch (e) {
-    return { items: [], status: "failed", note: (e as Error).message };
+  const bodies = new Map<string, { status: number; body: string; error?: string | null }>();
+  let batchError: string | undefined;
+
+  const browserSpecs = specs.filter((s) => s.parse === "reddit-html");
+  const plainSpecs = specs.filter((s) => s.parse === "html-list");
+
+  if (browserSpecs.length) {
+    const run = deps.run ?? spawnStealthCli;
+    try {
+      for (const r of await run(browserSpecs.map((s) => s.url))) bodies.set(r.url, r);
+    } catch (e) {
+      batchError = (e as Error).message;
+    }
   }
 
-  const byUrl = new Map(results.map((r) => [r.url, r]));
+  const doFetch = deps.fetchFn ?? fetch;
+  await Promise.all(
+    plainSpecs.map(async (s) => {
+      try {
+        const res = await doFetch(s.url);
+        bodies.set(s.url, {
+          status: res.status,
+          body: res.ok ? await res.text() : "",
+          error: res.ok ? null : `HTTP ${res.status}`,
+        });
+      } catch (e) {
+        bodies.set(s.url, { status: 0, body: "", error: String(e) });
+      }
+    }),
+  );
+
   const items: RawItem[] = [];
+  const seen = new Set<string>();
   let errors = 0;
 
   for (const spec of specs) {
-    const r = byUrl.get(spec.url);
+    const r = bodies.get(spec.url);
     if (!r || r.error || r.status >= 400 || !r.body) {
       errors++;
       continue;
     }
     try {
-      if (spec.parse === "reddit-json") {
-        const data = JSON.parse(r.body);
-        for (const child of data?.data?.children ?? []) {
-          const item = mapRedditChild(child, spec.label.replace(/^reddit\/r\//, ""));
-          if (item) items.push(item);
-        }
-      } else {
-        const links = await parseHtmlList(r.body, {
-          linkPrefix: spec.linkPrefix ?? "/",
-          origin: new URL(spec.url).origin,
-        });
-        for (const l of links) {
-          items.push({
-            id: stealthId(l.url),
-            source: "stealth", // requires Source union extension — see Step 4
-            sourceLabel: spec.label,
-            title: l.title,
-            url: l.url,
-          });
-        }
+      const parsed =
+        spec.parse === "reddit-html"
+          ? await parseRedditHtml(r.body)
+          : (
+              await parseHtmlList(r.body, {
+                linkPrefix: spec.linkPrefix ?? "/",
+                origin: new URL(spec.url).origin,
+              })
+            ).map(
+              (l): RawItem => ({
+                id: stealthId(l.url),
+                source: "stealth",
+                sourceLabel: spec.label,
+                title: l.title,
+                url: l.url,
+              }),
+            );
+      for (const it of parsed) {
+        if (seen.has(it.id)) continue;
+        seen.add(it.id);
+        items.push(it);
       }
     } catch {
       errors++;
@@ -457,229 +549,190 @@ export async function fetchStealth(
   return {
     items,
     status: sourceStatus({ items: items.length, errors, attempts: specs.length }),
-    note: errors ? `${errors}/${specs.length} stealth sources failed` : undefined,
+    note: batchError ?? (errors ? `${errors}/${specs.length} stealth sources failed` : undefined),
   };
 }
 ```
 
 - [ ] **Step 4: Add `"stealth"` to the `Source` union, run tests + typecheck**
 
-In `src/sources.ts` extend: `export type Source = "hackernews" | "reddit" | "github" | "stealth";`
-Run: `bun test src/__tests__/stealth-source.test.ts && bunx tsc --noEmit`
+In `src/sources.ts`: `export type Source = "hackernews" | "reddit" | "github" | "stealth";`
+Run: `cd /private/tmp/stealth-wt && bun test src/__tests__/stealth-source.test.ts && bunx tsc --noEmit`
 Expected: PASS, tsc clean. (Without the union change, tsc rejects `source: "stealth"` — that failure is the reminder.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
+cd /private/tmp/stealth-wt
 git add src/stealth-source.ts src/__tests__/stealth-source.test.ts src/sources.ts
-git commit -m "feat(stealth): fetchStealth wrapper with injected runner + health"
+git commit -m "feat(stealth): fetchStealth wrapper (browser reddit + plain-fetch blogs) + health"
 ```
 
 ---
 
-### Task 6: Wire into `fetchAllSources` and the CLI summary
+### Task 6: Wire into `fetchAllSources` — Reddit via stealth, blogs as new tier, delete legacy Reddit
 
 **Files:**
-- Modify: `src/sources.ts` (`FetchDeps`, `fetchAllSources`, CLI `import.meta.main` block)
-- Create: `src/stealth-targets.ts` (the curated spec list)
+- Create: `src/stealth-targets.ts` (curated spec lists)
+- Modify: `src/sources.ts` (`FetchDeps`, `fetchAllSources`, CLI block; export `SUBREDDITS`; delete legacy Reddit JSON path)
 - Modify: `src/__tests__/sources.test.ts`
 
 **Interfaces:**
-- Consumes: `fetchStealth`, `StealthSpec`, `StealthRunner` (Task 5).
-- Produces: `fetchAllSources` accepts `deps.stealthRun?: StealthRunner`, returns an added `stealth: RawItem[]` array and a `health.stealth` entry; CLI summary `counts` + `failed_sources` include stealth.
+- Consumes: `fetchStealth`, `StealthSpec`, `StealthRunner` (T5).
+- Produces: `fetchAllSources` accepts `deps.stealthRun?: StealthRunner`; `data.reddit` now comes from the stealth tier; adds `data.stealth: RawItem[]` and `health.stealth`; CLI `counts`/`top` include stealth.
 
-- [ ] **Step 1: Create the curated target list**
+- [ ] **Step 1: Create the curated target lists**
 
 ```ts
 // src/stealth-targets.ts
 import type { StealthSpec } from "./stealth-source.ts";
+import { SUBREDDITS } from "./sources.ts";
 
-// Server-rendered, feed-less (spike-confirmed 2026-08-20). Add block-prone
-// sources here; Reddit is added by Task 7 only if the 403 premise held.
-export const STEALTH_TARGETS: StealthSpec[] = [
+// Reddit: scrape each subreddit's HTML listing through the browser (JSON is 403).
+export const REDDIT_TARGETS: StealthSpec[] = SUBREDDITS.map((sub) => ({
+  url: `https://old.reddit.com/r/${sub}/`,
+  label: `reddit/r/${sub}`,
+  parse: "reddit-html",
+}));
+
+// Blogs: server-rendered, feed-less — plain fetch (spike-confirmed 2026-08-20).
+export const BLOG_TARGETS: StealthSpec[] = [
   { url: "https://www.anthropic.com/engineering", label: "anthropic/engineering", parse: "html-list", linkPrefix: "/engineering/" },
   { url: "https://www.anthropic.com/news", label: "anthropic/news", parse: "html-list", linkPrefix: "/news/" },
 ];
 ```
 
-- [ ] **Step 2: Write the failing test (health includes stealth)**
+- [ ] **Step 2: Write the failing tests** (in `src/__tests__/sources.test.ts`)
 
+First, a shared helper near the top (after `blockedFetch`):
 ```ts
-// add to src/__tests__/sources.test.ts — reuse the existing blockedFetch helper
-test("fetchAllSources includes stealth health", async () => {
-  const data = await fetchAllSources({
-    fetchFn: blockedFetch(403),
-    stealthRun: async () => [], // no stealth results
-  });
+// Reddit now flows through the stealth browser tier, never fetchFn — every
+// fetchAllSources test MUST inject stealthRun or it will spawn the real Python CLI.
+const failingStealth = async (urls: string[]) =>
+  urls.map((url) => ({ url, status: 403, body: "", error: "blocked" }));
+```
+
+Then add:
+```ts
+test("fetchAllSources exposes an independent stealth tier", async () => {
+  const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun: failingStealth });
   expect(data.health.stealth).toBeDefined();
   expect(Array.isArray(data.stealth)).toBe(true);
 });
-```
 
-- [ ] **Step 3: Run test to verify it fails**
-
-Run: `bun test src/__tests__/sources.test.ts`
-Expected: FAIL — `health.stealth` undefined / `stealthRun` not accepted by `FetchDeps`.
-
-- [ ] **Step 4: Wire it in**
-
-In `src/sources.ts`:
-- Add to `FetchDeps`: `stealthRun?: StealthRunner;` (import `StealthRunner` + `fetchStealth` from `./stealth-source.ts`, `STEALTH_TARGETS` from `./stealth-targets.ts`).
-- Add the fourth settled source:
-
-```ts
-const [hn, reddit, github, stealth] = await Promise.allSettled([
-  fetchHackerNews(deps),
-  fetchReddit(deps),
-  fetchGitHub(deps),
-  fetchStealth(STEALTH_TARGETS, { run: deps.stealthRun }),
-]);
-```
-- Add `stealth: settled(stealth).items` to the returned object and `stealth: health(settled(stealth))` to the `health` map. `health` is keyed by `Source`, which already includes `"stealth"` (Task 5) — no signature change needed.
-- In the `import.meta.main` block, add `stealth: data.stealth.length` to `counts`. The `failed_sources` scan already iterates `Object.keys(data.health)`, so stealth is included automatically.
-
-- [ ] **Step 5: Run tests + typecheck**
-
-Run: `bun test && bunx tsc --noEmit`
-Expected: full suite PASS, tsc clean.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/sources.ts src/stealth-targets.ts src/__tests__/sources.test.ts
-git commit -m "feat(stealth): wire stealth tier into fetchAllSources + CLI summary"
-```
-
----
-
-### Task 7: Reddit migration (CONDITIONAL on Task 1 Step 3)
-
-**Skip this task entirely if Task 1 Step 3 returned 403.** In that case add a one-line note to the PR that Reddit stays on the legacy path, and stop here.
-
-**Files:**
-- Modify: `src/sources.ts` (export `SUBREDDITS`; drop `fetchReddit` from the aggregate)
-- Modify: `src/stealth-targets.ts` (add Reddit specs)
-- Modify: `src/__tests__/sources.test.ts`
-
-- [ ] **Step 1: Add Reddit specs to the stealth targets**
-
-Export `SUBREDDITS` from `src/sources.ts` (`export const SUBREDDITS = [...]`), then in `src/stealth-targets.ts`:
-
-```ts
-import { SUBREDDITS } from "./sources.ts";
-
-for (const sub of SUBREDDITS) {
-  STEALTH_TARGETS.push({
-    url: `https://old.reddit.com/r/${sub}/hot.json?limit=10&t=day`,
-    label: `reddit/r/${sub}`,
-    parse: "reddit-json",
-  });
-}
-```
-
-- [ ] **Step 2: Write the failing test — reddit now flows through the stealth runner**
-
-```ts
-test("reddit items arrive via the stealth runner", async () => {
-  const data = await fetchAllSources({
-    fetchFn: blockedFetch(403), // legacy reddit path blocked
-    stealthRun: async (urls) =>
-      urls.map((url) => ({
-        url,
-        status: 200,
-        body: url.includes("reddit")
-          ? JSON.stringify({ data: { children: [{ data: { id: "r1", subreddit: "LocalLLaMA", title: "Via stealth", permalink: "/r/x/r1/", score: 2, num_comments: 0, created_utc: 1 } }] } })
-          : "<html></html>",
-      })),
-  });
-  expect(data.stealth.some((i) => i.id === "reddit:r1")).toBe(true);
+test("reddit items arrive via the stealth runner, not fetchFn", async () => {
+  const redditBody = `<div class=" thing link" data-fullname="t3_r1" data-subreddit="LocalLLaMA"
+      data-permalink="/r/LocalLLaMA/comments/r1/x/" data-score="2" data-comments-count="0"
+      data-timestamp="1000" data-promoted="false">
+      <a data-event-action="title" href="/r/LocalLLaMA/comments/r1/x/">Via stealth</a></div>`;
+  const stealthRun = async (urls: string[]) =>
+    urls.map((url) => ({ url, status: 200, body: url.includes("reddit") ? redditBody : "", error: null }));
+  const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun });
   expect(data.reddit.some((i) => i.id === "reddit:r1")).toBe(true);
+  expect(data.health.reddit.status).toBe("ok");
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 3: Run tests to verify they fail** — `bun test src/__tests__/sources.test.ts` → FAIL (`stealthRun` not on `FetchDeps`; `data.stealth`/`health.stealth` undefined).
 
-Run: `bun test src/__tests__/sources.test.ts`
-Expected: FAIL — reddit item not present (legacy `fetchReddit` is blocked and stealth reddit isn't wired to the top-level `reddit` array yet).
+- [ ] **Step 4: Wire it in and delete the legacy Reddit path** (`src/sources.ts`)
 
-- [ ] **Step 4: Serve Reddit from the stealth tier (avoid double-fetch)**
-
-In `fetchAllSources`, drop `fetchReddit(deps)` from the `Promise.allSettled` list and source the top-level `reddit` array from the stealth results:
+1. **Export `SUBREDDITS`**: change `const SUBREDDITS` → `export const SUBREDDITS`.
+2. **Delete** the entire legacy Reddit JSON machinery: `REDDIT_SEARCHES`, `redditFetch`, and `fetchReddit` (all now dead — `.json` is 403 with no working fallback). Keep `redditId` (still used by `parseRedditHtml`).
+3. **Import** at top: `import { fetchStealth, type StealthRunner } from "./stealth-source.ts";` and `import { REDDIT_TARGETS, BLOG_TARGETS } from "./stealth-targets.ts";`
+4. **Add to `FetchDeps`**: `stealthRun?: StealthRunner;`
+5. **Rewrite the aggregate** — two homogeneous stealth calls:
 
 ```ts
-const [hn, github, stealth] = await Promise.allSettled([
-  fetchHackerNews(deps),
-  fetchGitHub(deps),
-  fetchStealth(STEALTH_TARGETS, { run: deps.stealthRun }),
-]);
-const stealthItems = settled(stealth).items;
-// ...
-return {
-  hn: settled(hn).items,
-  reddit: stealthItems.filter((i) => i.source === "reddit"), // ponytail: reddit moved to stealth tier
-  github: settled(github).items,
-  stealth: stealthItems,
-  health: {
-    hackernews: health(settled(hn)),
-    reddit: health(settled(stealth)),   // reddit health = stealth-tier health (its fetcher)
-    github: health(settled(github)),
-    stealth: health(settled(stealth)),
-  },
-};
+export async function fetchAllSources(deps: FetchDeps = {}): Promise<{
+  hn: RawItem[];
+  reddit: RawItem[];
+  github: RawItem[];
+  stealth: RawItem[];
+  health: Record<Source, SourceHealth>;
+}> {
+  const [hn, github, reddit, stealth] = await Promise.allSettled([
+    fetchHackerNews(deps),
+    fetchGitHub(deps),
+    fetchStealth(REDDIT_TARGETS, { run: deps.stealthRun, fetchFn: deps.fetchFn }),
+    fetchStealth(BLOG_TARGETS, { run: deps.stealthRun, fetchFn: deps.fetchFn }),
+  ]);
+  const results = {
+    hackernews: settled(hn),
+    github: settled(github),
+    reddit: settled(reddit),
+    stealth: settled(stealth),
+  };
+  return {
+    hn: results.hackernews.items,
+    reddit: results.reddit.items,
+    github: results.github.items,
+    stealth: results.stealth.items,
+    health: {
+      hackernews: health(results.hackernews),
+      reddit: health(results.reddit),
+      github: health(results.github),
+      stealth: health(results.stealth),
+    },
+  };
+}
 ```
-Keep `fetchReddit` exported (still unit-tested) but unused by the aggregate; add a comment `// ponytail: kept for the legacy/manual path; aggregate now uses the stealth tier`.
 
-- [ ] **Step 5: Run tests + typecheck**
+6. **CLI block** (`import.meta.main`): add `data.stealth` to the summary-truncation loop; add `stealth: data.stealth.length` to `counts`; add `stealth: data.stealth.slice(0,3).map(...)` to `top`. `failed_sources` already scans `Object.keys(data.health)`, so stealth + reddit are included automatically.
 
-Run: `bun test && bunx tsc --noEmit`
-Expected: PASS, tsc clean. The existing `fetchReddit` 403 unit test still passes (function unchanged); the aggregate no longer depends on it.
+- [ ] **Step 5: Fix the existing `fetchAllSources` tests to inject `stealthRun`**
 
-- [ ] **Step 6: Commit**
+The legacy `fetchReddit` `describe` block and its import are gone (function deleted) — remove them. Every existing `fetchAllSources(...)` call must add `stealthRun: failingStealth` (or a purpose-built runner) so no test spawns the real CLI:
+- "reports per-source health…": add `stealthRun: failingStealth`; it still asserts `data.health.reddit.status === "failed"` (reddit 403 via the runner) — intent preserved.
+- "keeps the item arrays…": add `stealthRun: failingStealth`; also assert `Array.isArray(data.stealth)`.
+- "mixed failure keeps healthy sources…": add `stealthRun: failingStealth` (reddit stays failed via the runner; `fetchFn` still drives HN/GitHub). Keep the HN-ok / reddit-failed / github-ok assertions.
+
+- [ ] **Step 6: Run full suite + typecheck** — `cd /private/tmp/stealth-wt && bun test && bunx tsc --noEmit` → all PASS, tsc clean.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/stealth-targets.ts src/sources.ts src/__tests__/sources.test.ts
-git commit -m "feat(stealth): route Reddit through the stealth tier"
+cd /private/tmp/stealth-wt
+git add src/sources.ts src/stealth-targets.ts src/__tests__/sources.test.ts
+git commit -m "feat(stealth): route Reddit through stealth tier, add blog tier, drop legacy Reddit JSON"
 ```
 
 ---
 
-### Task 8: Docs + scheduled-env verification
+### Task 7: Docs + scheduled-env verification
 
 **Files:**
 - Modify: `README.md`
 - Modify: `triggers/scheduled-brief.md`
 
-- [ ] **Step 1: Document the dependency + failure mode**
+- [ ] **Step 1: Document the dependency + failure mode** — In `README.md`, add a "Stealth source tier" note: Reddit + Anthropic blogs read through a browser/plain-fetch tier; requires `python3` + `pip install "scrapling[fetchers]"` + `scrapling install` (Camoufox browser) on the box for Reddit specifically; Anthropic needs only Bun. If Python/scrapling/browser is missing, `health.reddit` degrades to `failed` with a `note` (it does not silently drop — PR #13 health). Note it is seconds-per-page, so Reddit is the slow leg.
 
-In `README.md`, add a "Stealth source tier" note: requires `python3` + `pip install "scrapling[fetchers]"` on the box (no browser); the brief degrades with a `failed_sources` warning if Python/scrapling is missing (it does not silently drop — see PR #13 health).
+- [ ] **Step 2: Note the tier in the trigger prompt** — In `triggers/scheduled-brief.md` step 1, add that `failed_sources` may now include `reddit` (browser tier) and `stealth` (blogs), and that each `note` names the cause (e.g. "python3 not found", "StealthySession failed to start", or a per-URL failure count).
 
-- [ ] **Step 2: Note the tier in the trigger prompt**
-
-In `triggers/scheduled-brief.md` step 1, add that `failed_sources` may now include `stealth` and that its `note` will name the cause (e.g. "python3 not found" or a per-URL failure count).
-
-- [ ] **Step 3: Verify in the ACTUAL scheduled environment**
-
-The weeks of FAILED briefs came from the scheduler's env lacking `.env`; the same class of gap applies to `python3`/scrapling. Confirm the launchd run can reach them under the same PATH `run-trigger.sh` exports:
+- [ ] **Step 3: Verify in the ACTUAL scheduled environment** — CONTROLLER-RUN. The weeks of FAILED briefs came from the scheduler's env lacking `.env`; the same class of gap applies to `python3`/scrapling/browser. Confirm the launchd run can reach them under the PATH `run-trigger.sh` exports:
 
 ```bash
 env -i PATH="$HOME/.bun/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
-  python3 -c "import scrapling; print('scrapling ok')"
+  python3 -c "from scrapling.fetchers import StealthySession; print('stealth ok')"
 ```
-Expected: `scrapling ok`. If not, install scrapling into the interpreter that PATH resolves, or prepend its location to `run-trigger.sh`'s PATH export. Record the result in the PR.
+Expected: `stealth ok`. If not, install into the interpreter that PATH resolves, or prepend its location to `run-trigger.sh`'s PATH export. Record the result in the PR.
 
 - [ ] **Step 4: Commit**
 
 ```bash
+cd /private/tmp/stealth-wt
 git add README.md triggers/scheduled-brief.md
-git commit -m "docs(stealth): document python/scrapling dependency + scheduled-env check"
+git commit -m "docs(stealth): document python/scrapling browser dependency + scheduled-env check"
 ```
 
 ---
 
 ## Self-Review
 
-**Spec coverage:** thin Python CLI (T2) ✓; TS-only parsing (T3 html, T4 reddit map, T5 wrapper) ✓; `FetchResult`/health reuse (T5, T6) ✓; source config (T6) ✓; Reddit migration conditional on the 403 premise (T1→T7) ✓; light-install + Reddit-premise verifies (T1) ✓; dedupe via stable ids (T4 reddit id, T5 `stealthId`) ✓; scheduled-env dependency check (T8) ✓; deferred `StealthyFetcher`/Lightpanda — no task, correct ✓.
+**Spec coverage (revised):** thin Python CLI (T2, now `StealthySession`) ✓; TS-only parsing (T3 html-list, T4 reddit-html) ✓; `FetchResult`/health reuse (T5, T6) ✓; source config (T6 targets) ✓; Reddit migration REINSTATED via browser HTML scrape (T4→T6) ✓; dedupe via stable ids (T4 reddit id from `data-fullname`, T5 `stealthId`) ✓; independent per-source health via two homogeneous `fetchStealth` calls (T6) ✓; scheduled-env dependency check incl. browser (T7) ✓.
 
-**Placeholder scan:** no TBD/TODO. The `source: "stealth"` value in Task 5 Step 3 is defined by the union extension in the same task's Step 4 (tsc failure is the built-in reminder). No "similar to Task N" — code is repeated where needed.
+**Deviations from the spec (documented in the TODO):** "no browser" reversed — Reddit needs Camoufox; `reddit-json` → `reddit-html`; Anthropic on plain Bun `fetch` (not the CLI); legacy `fetchReddit` JSON path deleted (403 always, no working fallback); Reddit keyword-searches (`REDDIT_SEARCHES`) dropped (HTML scrape covers subreddit hot listings only — re-add via a search-results HTML scrape if coverage suffers).
 
-**Type consistency:** `StealthSpec`, `StealthRunner`, `FetchResult`, `RawItem`, `sourceStatus`, `mapRedditChild`, `parseHtmlList`, `stealthId` names/signatures match across T3–T7. `Source` union extended once (T5 Step 4) and consumed (T5, T6). `deps.stealthRun` (T6) threads into `fetchStealth`'s `deps.run` (T5). Reddit health keyed to the stealth fetcher's status after T7 (documented in T7 Step 4).
+**Type consistency:** `StealthSpec.parse` is `"reddit-html" | "html-list"` in T5 and consumed by T6 targets; `StealthRunner`, `FetchResult`, `RawItem`, `sourceStatus`, `redditId`, `parseHtmlList`, `parseRedditHtml`, `stealthId` names/signatures match across T3–T6. `Source` union extended once (T5 Step 4). `deps.stealthRun` (T6 `FetchDeps`) threads into `fetchStealth`'s `deps.run` (T5). Reddit health = its own stealth-call status; blog health = the other call's status — never shared.
+
+**Placeholder scan:** no TBD/TODO. `source: "stealth"` (T5) is defined by the union extension in the same task's Step 4 (tsc failure is the reminder).

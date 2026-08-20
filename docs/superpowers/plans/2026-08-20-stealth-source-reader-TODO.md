@@ -5,6 +5,12 @@ Issues + architecture revisions surfaced during subagent-driven execution of
 
 ## RESOLVED → ARCHITECTURE REVISION (2026-08-20 evening)
 
+**✅ APPLIED to the plan (2026-08-20 evening).** The revisions below are now
+folded into `2026-08-20-stealth-source-reader.md` (Tasks 2–7 rewritten:
+`StealthySession` CLI, `reddit-html` parser via `data-*` attrs, Anthropic on
+plain Bun `fetch`, two independent `fetchStealth` calls, legacy Reddit JSON
+deleted). This TODO is retained as rationale/history.
+
 **Task 1 gate ran live. The static-`Fetcher` premise failed; user ruled to
 escalate to `StealthyFetcher`. The plan below is REVISED accordingly — read
 this before executing any task.**
