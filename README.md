@@ -9,6 +9,15 @@ This is v2: the runtime is a Claude Code agent driven by the prompt in `triggers
 - **Scheduled brief** — a Claude Code RemoteTrigger fires at 6:30 AM daily, loads `triggers/scheduled-brief.md`, runs `bun run fetch`, dedupes via MongoDB, uses WebFetch for depth, drafts the brief, sends via `bun run send`, commits the brief file to this repo, and updates `signals`.
 - **Interactive listener** — a local Claude Code session (run in tmux) loads `triggers/listener.md` and responds to Telegram DMs via the `plugin:telegram` MCP.
 
+## Source tiers
+
+The brief draws from multiple sources via two independent fetch tiers:
+
+- **Stealth source tier** — Reddit (via Camoufox browser) and Anthropic blogs (plain Bun fetch)
+  - **Reddit**: Scrapes `old.reddit.com/r/<sub>/` HTML via Python's `StealthySession` (Camoufox browser). Requires `python3 >= 3.9`, `pip install "scrapling[fetchers]"`, and `scrapling install` (installs Camoufox). **Warning: ~1–2 seconds per subreddit.** If `python3`, `scrapling`, or the browser is missing, `health.reddit` degrades to `failed` with a `note` field naming the cause rather than silently dropping Reddit from the brief.
+  - **Anthropic blogs**: Fetched via plain Bun `fetch` (engineering + news feeds). No browser or Python required — Bun is sufficient.
+  - **Health**: `health.reddit` and `health.stealth` report independently; if Python/browser is missing, the brief still runs with remaining sources.
+
 ## Setup
 
 ### 1. Install
