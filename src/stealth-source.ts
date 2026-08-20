@@ -1,6 +1,6 @@
 // src/stealth-source.ts
 
-import { type RawItem, redditId } from "./sources.ts";
+import { type RawItem, type FetchResult, redditId, sourceStatus } from "./sources.ts";
 
 export async function parseHtmlList(
   html: string,
@@ -94,4 +94,115 @@ export async function parseRedditHtml(html: string): Promise<RawItem[]> {
 
   await rewriter.transform(new Response(html)).text();
   return out;
+}
+
+export interface StealthSpec {
+  url: string;
+  label: string;
+  parse: "reddit-html" | "html-list";
+  linkPrefix?: string;
+}
+
+export type StealthRunner = (
+  urls: string[],
+) => Promise<Array<{ url: string; status: number; body: string; error?: string | null }>>;
+
+// Stable id for html-list items (no natural id like reddit's fullname).
+const stealthId = (url: string) =>
+  "stealth:" + new Bun.CryptoHasher("sha1").update(url).digest("hex").slice(0, 16);
+
+async function spawnStealthCli(urls: string[]) {
+  const proc = Bun.spawn(["python3", "scripts/stealth-fetch.py"], {
+    stdin: new TextEncoder().encode(urls.join("\n")),
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: import.meta.dir + "/..", // repo root, so the script path resolves regardless of caller cwd
+  });
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`stealth-fetch.py exited ${code}: ${err.trim()}`);
+  }
+  return JSON.parse(out) as Awaited<ReturnType<StealthRunner>>;
+}
+
+export async function fetchStealth(
+  specs: StealthSpec[],
+  deps: { run?: StealthRunner; fetchFn?: typeof fetch } = {},
+): Promise<FetchResult> {
+  const bodies = new Map<string, { status: number; body: string; error?: string | null }>();
+  let batchError: string | undefined;
+
+  const browserSpecs = specs.filter((s) => s.parse === "reddit-html");
+  const plainSpecs = specs.filter((s) => s.parse === "html-list");
+
+  if (browserSpecs.length) {
+    const run = deps.run ?? spawnStealthCli;
+    try {
+      for (const r of await run(browserSpecs.map((s) => s.url))) bodies.set(r.url, r);
+    } catch (e) {
+      batchError = (e as Error).message;
+    }
+  }
+
+  const doFetch = deps.fetchFn ?? fetch;
+  await Promise.all(
+    plainSpecs.map(async (s) => {
+      try {
+        const res = await doFetch(s.url);
+        bodies.set(s.url, {
+          status: res.status,
+          body: res.ok ? await res.text() : "",
+          error: res.ok ? null : `HTTP ${res.status}`,
+        });
+      } catch (e) {
+        bodies.set(s.url, { status: 0, body: "", error: String(e) });
+      }
+    }),
+  );
+
+  const items: RawItem[] = [];
+  const seen = new Set<string>();
+  let errors = 0;
+
+  for (const spec of specs) {
+    const r = bodies.get(spec.url);
+    if (!r || r.error || r.status >= 400 || !r.body) {
+      errors++;
+      continue;
+    }
+    try {
+      const parsed =
+        spec.parse === "reddit-html"
+          ? await parseRedditHtml(r.body)
+          : (
+              await parseHtmlList(r.body, {
+                linkPrefix: spec.linkPrefix ?? "/",
+                origin: new URL(spec.url).origin,
+              })
+            ).map(
+              (l): RawItem => ({
+                id: stealthId(l.url),
+                source: "stealth",
+                sourceLabel: spec.label,
+                title: l.title,
+                url: l.url,
+              }),
+            );
+      for (const it of parsed) {
+        if (seen.has(it.id)) continue;
+        seen.add(it.id);
+        items.push(it);
+      }
+    } catch {
+      errors++;
+    }
+  }
+
+  return {
+    items,
+    status: sourceStatus({ items: items.length, errors, attempts: specs.length }),
+    note: batchError ?? (errors ? `${errors}/${specs.length} stealth sources failed` : undefined),
+  };
 }

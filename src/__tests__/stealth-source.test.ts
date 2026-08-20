@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseHtmlList, parseRedditHtml } from "../stealth-source.ts";
+import { parseHtmlList, parseRedditHtml, fetchStealth, type StealthSpec, type StealthRunner } from "../stealth-source.ts";
 
 describe("parseHtmlList", () => {
   const html = `
@@ -68,5 +68,61 @@ describe("parseRedditHtml", () => {
   test("skips stickied and promoted posts", async () => {
     const out = await parseRedditHtml(html);
     expect(out.map((i) => i.id)).toEqual(["reddit:aaa"]);
+  });
+});
+
+describe("fetchStealth", () => {
+  const redditSpecs: StealthSpec[] = [
+    { url: "https://old.reddit.com/r/LocalLLaMA/", label: "reddit/r/LocalLLaMA", parse: "reddit-html" },
+  ];
+  const blogSpecs: StealthSpec[] = [
+    { url: "https://www.anthropic.com/engineering", label: "anthropic/engineering", parse: "html-list", linkPrefix: "/engineering/" },
+  ];
+  const redditBody = `<div class=" thing link" data-fullname="t3_z" data-subreddit="LocalLLaMA"
+      data-permalink="/r/LocalLLaMA/comments/z/x/" data-score="5" data-comments-count="1"
+      data-timestamp="1000" data-promoted="false">
+      <a data-event-action="title" href="/r/LocalLLaMA/comments/z/x/">Reddit post</a></div>`;
+
+  test("reddit-html specs fetch via run() and parse posts", async () => {
+    const run: StealthRunner = async (urls) => urls.map((url) => ({ url, status: 200, body: redditBody, error: null }));
+    const res = await fetchStealth(redditSpecs, { run });
+    expect(res.status).toBe("ok");
+    expect(res.items.map((i) => i.id)).toEqual(["reddit:z"]);
+    expect(res.items[0].source).toBe("reddit");
+  });
+
+  test("html-list specs fetch via fetchFn and get stealth ids", async () => {
+    const fetchFn = (async () =>
+      new Response(`<a href="/engineering/harnesses"><h3>Harnesses</h3></a>`, { status: 200 })) as unknown as typeof fetch;
+    const res = await fetchStealth(blogSpecs, { fetchFn });
+    expect(res.status).toBe("ok");
+    expect(res.items[0].id).toMatch(/^stealth:/);
+    expect(res.items[0].source).toBe("stealth");
+    expect(res.items[0].sourceLabel).toBe("anthropic/engineering");
+  });
+
+  test("all-failed sources report failed, not empty", async () => {
+    const run: StealthRunner = async (urls) => urls.map((url) => ({ url, status: 403, body: "", error: "blocked" }));
+    const res = await fetchStealth(redditSpecs, { run });
+    expect(res.status).toBe("failed");
+    expect(res.items).toHaveLength(0);
+  });
+
+  test("a thrown browser batch is failed with the error in note", async () => {
+    const run: StealthRunner = async () => { throw new Error("python3 not found"); };
+    const res = await fetchStealth(redditSpecs, { run });
+    expect(res.status).toBe("failed");
+    expect(res.note).toContain("python3 not found");
+  });
+
+  test("partial failure keeps good items and notes the bad one", async () => {
+    const specs = [...blogSpecs, { url: "https://www.anthropic.com/news", label: "anthropic/news", parse: "html-list", linkPrefix: "/news/" } as StealthSpec];
+    const fetchFn = (async (url: string) =>
+      url.includes("/news")
+        ? new Response("blocked", { status: 403 })
+        : new Response(`<a href="/engineering/x"><h3>X</h3></a>`, { status: 200 })) as unknown as typeof fetch;
+    const res = await fetchStealth(specs, { fetchFn });
+    expect(res.items).toHaveLength(1);
+    expect(res.note).toContain("1/2");
   });
 });

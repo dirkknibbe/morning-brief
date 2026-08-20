@@ -6,7 +6,7 @@
  * as JSON on stdout.
  */
 
-export type Source = "hackernews" | "reddit" | "github";
+export type Source = "hackernews" | "reddit" | "github" | "stealth";
 
 export interface RawItem {
   id: string;               // stable: "hn:123", "reddit:abc", "gh:owner/repo"
