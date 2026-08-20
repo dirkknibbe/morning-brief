@@ -1,45 +1,71 @@
 # Stealth Source Reader — Implementation TODO / Issues
 
-Issues surfaced during subagent-driven execution of
+Issues + architecture revisions surfaced during subagent-driven execution of
 `2026-08-20-stealth-source-reader.md`. Newest first.
 
-## OPEN — BLOCKER (2026-08-20, Task 1 gate)
+## RESOLVED → ARCHITECTURE REVISION (2026-08-20 evening)
 
-**The static `Fetcher` premise failed against the one source that matters.**
+**Task 1 gate ran live. The static-`Fetcher` premise failed; user ruled to
+escalate to `StealthyFetcher`. The plan below is REVISED accordingly — read
+this before executing any task.**
 
-Task 1 live results:
-- `Fetcher.get('https://example.com', impersonate='chrome')` → **200** (light install works, no browser). ✅
-- `Fetcher.get('https://old.reddit.com/r/LocalLLaMA/hot.json', impersonate='chrome')` → **403**. ❌
+Empirical matrix (tested on the box, `scrapling[fetchers]` + `scrapling install`):
 
-Consequence: `impersonate` (TLS/UA spoofing) does **not** beat Reddit's block —
-Reddit is blocking below the fingerprint layer (endpoint/IP / non-OAuth JSON
-lockdown). Per the plan's Task 1 gate, **Task 7 (Reddit migration) is dropped**.
+| Fetcher | reddit `.json` | reddit HTML | example.com |
+|---|---|---|---|
+| static `Fetcher(impersonate='chrome')` | 403 | 403 | 200 |
+| `StealthyFetcher.fetch(headless=True)` | 403 | **200 (38–76 posts)** | — |
 
-**The deeper problem:** with Reddit gone, the tier's only live targets are
-Anthropic news + engineering, which the 2026-08-20 spike already proved are
-**server-rendered — a plain `fetch` reads them**. So the Scrapling static-Fetcher
-tier, as scoped, adds **no capability over a plain HTTP fetch**. Building
-Tasks 2–8 would be plumbing (Python CLI + spawn + parse) around a fetch that
-Bun's built-in `fetch` already does.
+**Revisions to the plan (supersede the original task text where they conflict):**
 
-**Decision required (paused execution):**
-1. **Plain-fetch tier, drop Scrapling** — add Anthropic (+ other server-rendered
-   feed-less sources) via a Bun `fetch` + `parseHtmlList`. Keep Tasks 3–6/8,
-   delete Task 2 (Python CLI) and the whole Scrapling dependency. Get Reddit
-   back via OAuth separately. *(Lightest; likely the right call.)*
-2. **Escalate to `StealthyFetcher` + Camoufox** — the deferred heavy browser
-   tier — to actually beat Reddit. Reopens the browser dependency we spent this
-   session avoiding. Only worth it if Reddit specifically is must-have.
-3. **Reddit via OAuth** (sanctioned API, 100 req/min) instead of any scraping —
-   orthogonal to this plan; a separate small task.
+1. **Global constraint "No browser" is REVERSED.** The tier now REQUIRES the
+   Camoufox/patchright browser (`pip install "scrapling[fetchers]"` +
+   `scrapling install`, already done on this box). Update the plan's Global
+   Constraints and Task 8 docs accordingly.
 
-Until resolved, Tasks 2–8 are **not** dispatched.
+2. **`scripts/stealth-fetch.py` uses `StealthyFetcher`, not static `Fetcher`.**
+   Same stdin→JSON `{url,status,body,error}` contract. **Use one
+   `StealthySession` for the whole batch** (browser reuse) — do NOT launch a
+   browser per URL; ~9 subreddits × per-fetch browser would be intolerably slow.
+   Sketch:
+   ```python
+   from scrapling.fetchers import StealthySession
+   with StealthySession(headless=True) as s:
+       for url in urls:
+           p = s.fetch(url)            # reuses the one browser
+           out.append({"url": url, "status": p.status, "body": p.body, "error": None})
+   ```
 
-## Notes / smaller items
+3. **Reddit parse mode changes `reddit-json` → `reddit-html`.** Reddit `.json`
+   is 403 even under the browser; scrape the HTML page instead. New parser:
+   CSS `a[href*="/comments/"]` → each is a post; title = link text, url = href,
+   id = `reddit:` + the `/comments/<id>/` segment (dedupe on it). Task 4's
+   `mapRedditChild` (JSON-shaped) is replaced by this HTML parser. Target URLs
+   become `https://old.reddit.com/r/<sub>/` (HTML), not `.../hot.json`.
 
-- `parseHtmlList` (Task 3) and the Anthropic targets (Task 6) survive under
-  option 1 unchanged — the parsing work is reusable regardless of fetch transport.
-- Environment friction observed this session: the context-mode hook blocks
-  inline HTTP from Bash, and GateGuard fact-forces edits. Subagents dispatched
-  into this environment for network/machine steps will hit these — run
-  install/probe steps in the controller (as Task 1 was), not in subagents.
+4. **Task 7 (Reddit migration) is REINSTATED** — it works now, via #2 + #3.
+
+5. **Anthropic stays plain `fetch`** (server-rendered; no browser needed).
+   Decide during implementation whether to route it through the same
+   StealthySession for uniformity or keep it on Bun `fetch` (lighter — prefer
+   the latter unless it complicates the code).
+
+6. **Performance caveat (NEW, must handle):** `StealthyFetcher` is
+   seconds-per-page. Cap the subreddit count and/or run the stealth batch with a
+   generous timeout; the fetch stage will be much slower than the current
+   all-`fetch` pipeline. Consider fetching Reddit less often than HN/GitHub.
+
+**Verify-items status:** light-install ✓ (done); Reddit-premise ✓ *resolved*
+(static fails, StealthyFetcher-HTML works). No further gating probes needed.
+
+## Notes
+
+- `parseHtmlList` (Task 3, HTMLRewriter) is still useful for Anthropic; the
+  Reddit HTML parser is a separate `reddit-html` mode (different selector shape).
+- Environment friction: context-mode hook redirects inline HTTP to
+  `ctx_execute`; GateGuard fact-forces file writes. Run network/install/probe
+  steps in the controller via `ctx_execute(python)` — subagents will trip on
+  these.
+- Session state: spec + plan + this TODO committed on `feat/stealth-source-reader`
+  (pushed). PR #13 (source health) already merged to main. Nothing of the
+  stealth tier is implemented yet.
