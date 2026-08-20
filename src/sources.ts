@@ -21,6 +21,32 @@ export interface RawItem {
   timestamp?: number;       // unix seconds
 }
 
+/**
+ * A source that errored on every attempt is `failed`, not `empty` — the brief
+ * needs to tell "the well is dry" apart from "the pipe is broken".
+ */
+export type SourceStatus = "ok" | "empty" | "failed";
+
+export function sourceStatus(counts: {
+  items: number;
+  errors: number;
+  attempts: number;
+}): SourceStatus {
+  if (counts.items > 0) return "ok";
+  return counts.errors > 0 ? "failed" : "empty";
+}
+
+export interface FetchResult {
+  items: RawItem[];
+  status: SourceStatus;
+  note?: string;
+}
+
+export interface FetchDeps {
+  token?: string;
+  fetchFn?: typeof fetch;
+}
+
 // ── ID helpers (pure, tested) ─────────────────────────────────────────
 
 export const hnId = (objectID: string | number) => `hn:${objectID}`;
@@ -37,14 +63,16 @@ const HN_QUERIES = [
   "browser automation agent",
 ];
 
-export async function fetchHackerNews(): Promise<RawItem[]> {
+export async function fetchHackerNews(deps: FetchDeps = {}): Promise<FetchResult> {
+  const doFetch = deps.fetchFn ?? fetch;
   const items: RawItem[] = [];
   const seen = new Set<string>();
+  let errors = 0;
 
   for (const query of HN_QUERIES) {
     try {
       const since = Math.floor(Date.now() / 1000) - 86400;
-      const res = await fetch(
+      const res = await doFetch(
         `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(
           query
         )}&tags=story&numericFilters=created_at_i>${since}`
@@ -69,11 +97,19 @@ export async function fetchHackerNews(): Promise<RawItem[]> {
         });
       }
     } catch (e) {
+      errors++;
       console.warn(`[HN] query "${query}" failed:`, (e as Error).message);
     }
   }
 
-  return items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15);
+  return {
+    items: items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15),
+    status: sourceStatus({
+      items: items.length,
+      errors,
+      attempts: HN_QUERIES.length,
+    }),
+  };
 }
 
 // ── Reddit ────────────────────────────────────────────────────────────
@@ -96,20 +132,25 @@ const REDDIT_SEARCHES = [
   { sub: "all", q: "micropayment API developer" },
 ];
 
-async function redditFetch(url: string): Promise<any> {
-  const res = await fetch(url, { headers: { "User-Agent": "MorningBrief/2.0" } });
+async function redditFetch(url: string, doFetch: typeof fetch): Promise<any> {
+  const res = await doFetch(url, {
+    headers: { "User-Agent": "MorningBrief/2.0" },
+  });
   if (!res.ok) throw new Error(`Reddit ${res.status}`);
   return res.json();
 }
 
-export async function fetchReddit(): Promise<RawItem[]> {
+export async function fetchReddit(deps: FetchDeps = {}): Promise<FetchResult> {
+  const doFetch = deps.fetchFn ?? fetch;
   const items: RawItem[] = [];
   const seen = new Set<string>();
+  let errors = 0;
 
   for (const sub of SUBREDDITS) {
     try {
       const data = await redditFetch(
-        `https://old.reddit.com/r/${sub}/hot.json?limit=10&t=day`
+        `https://old.reddit.com/r/${sub}/hot.json?limit=10&t=day`,
+        doFetch
       );
       for (const child of data?.data?.children ?? []) {
         const post = child.data;
@@ -130,6 +171,7 @@ export async function fetchReddit(): Promise<RawItem[]> {
         });
       }
     } catch (e) {
+      errors++;
       console.warn(`[Reddit] r/${sub} failed:`, (e as Error).message);
     }
   }
@@ -139,7 +181,8 @@ export async function fetchReddit(): Promise<RawItem[]> {
       const data = await redditFetch(
         `https://old.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(
           q
-        )}&sort=new&t=day&limit=5`
+        )}&sort=new&t=day&limit=5`,
+        doFetch
       );
       for (const child of data?.data?.children ?? []) {
         const post = child.data;
@@ -160,11 +203,19 @@ export async function fetchReddit(): Promise<RawItem[]> {
         });
       }
     } catch (e) {
+      errors++;
       console.warn(`[Reddit] search "${q}" failed:`, (e as Error).message);
     }
   }
 
-  return items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15);
+  return {
+    items: items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15),
+    status: sourceStatus({
+      items: items.length,
+      errors,
+      attempts: SUBREDDITS.length + REDDIT_SEARCHES.length,
+    }),
+  };
 }
 
 // ── GitHub ────────────────────────────────────────────────────────────
@@ -178,15 +229,25 @@ const GH_QUERIES = [
   "agent framework",
 ];
 
-export async function fetchGitHub(): Promise<RawItem[]> {
-  const items: RawItem[] = [];
-  const seen = new Set<string>();
-  const token = process.env.GITHUB_TOKEN;
-
+const ghHeaders = (token?: string): Record<string, string> => {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github.v3+json",
   };
   if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
+export async function fetchGitHub(deps: FetchDeps = {}): Promise<FetchResult> {
+  const doFetch = deps.fetchFn ?? fetch;
+  const token = deps.token ?? process.env.GITHUB_TOKEN;
+  const items: RawItem[] = [];
+  const seen = new Set<string>();
+  let errors = 0;
+  let note: string | undefined;
+
+  // Unauthenticated search still works (at a lower rate limit), so an expired
+  // token must degrade the brief rather than empty it.
+  let useAuth = Boolean(token);
 
   const weekAgo = new Date(Date.now() - 7 * 86400 * 1000)
     .toISOString()
@@ -195,10 +256,16 @@ export async function fetchGitHub(): Promise<RawItem[]> {
   for (const query of GH_QUERIES) {
     try {
       const q = encodeURIComponent(`${query} pushed:>${weekAgo}`);
-      const res = await fetch(
-        `https://api.github.com/search/repositories?q=${q}&sort=stars&order=desc&per_page=5`,
-        { headers }
-      );
+      const url = `https://api.github.com/search/repositories?q=${q}&sort=stars&order=desc&per_page=5`;
+
+      let res = await doFetch(url, { headers: ghHeaders(useAuth ? token : undefined) });
+      if (res.status === 401 && useAuth) {
+        useAuth = false;
+        note = "GITHUB_TOKEN rejected (401) — continuing unauthenticated";
+        console.warn(`[GH] ${note}`);
+        res = await doFetch(url, { headers: ghHeaders(undefined) });
+      }
+
       if (!res.ok) throw new Error(`GH ${res.status}`);
       const data = (await res.json()) as any;
 
@@ -218,29 +285,68 @@ export async function fetchGitHub(): Promise<RawItem[]> {
         });
       }
     } catch (e) {
+      errors++;
       console.warn(`[GH] query "${query}" failed:`, (e as Error).message);
     }
   }
 
-  return items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15);
+  return {
+    items: items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15),
+    status: sourceStatus({
+      items: items.length,
+      errors,
+      attempts: GH_QUERIES.length,
+    }),
+    note,
+  };
 }
 
 // ── Aggregate ─────────────────────────────────────────────────────────
 
-export async function fetchAllSources(): Promise<{
+export interface SourceHealth {
+  status: SourceStatus;
+  count: number;
+  note?: string;
+}
+
+// A rejected promise means the fetcher itself threw — treat that as failed,
+// never as an empty result.
+const settled = (r: PromiseSettledResult<FetchResult>): FetchResult =>
+  r.status === "fulfilled"
+    ? r.value
+    : { items: [], status: "failed", note: String(r.reason) };
+
+const health = (r: FetchResult): SourceHealth => ({
+  status: r.status,
+  count: r.items.length,
+  note: r.note,
+});
+
+export async function fetchAllSources(deps: FetchDeps = {}): Promise<{
   hn: RawItem[];
   reddit: RawItem[];
   github: RawItem[];
+  health: Record<Source, SourceHealth>;
 }> {
   const [hn, reddit, github] = await Promise.allSettled([
-    fetchHackerNews(),
-    fetchReddit(),
-    fetchGitHub(),
+    fetchHackerNews(deps),
+    fetchReddit(deps),
+    fetchGitHub(deps),
   ]);
+  const results = {
+    hackernews: settled(hn),
+    reddit: settled(reddit),
+    github: settled(github),
+  };
   return {
-    hn: hn.status === "fulfilled" ? hn.value : [],
-    reddit: reddit.status === "fulfilled" ? reddit.value : [],
-    github: github.status === "fulfilled" ? github.value : [],
+    hn: results.hackernews.items,
+    reddit: results.reddit.items,
+    github: results.github.items,
+    health: {
+      hackernews: health(results.hackernews),
+      reddit: health(results.reddit),
+      github: health(results.github),
+    },
   };
 }
 
@@ -265,9 +371,15 @@ if (import.meta.main) {
   writeFileSync(outPath, JSON.stringify(data, null, 2));
 
   // Compact summary to stdout: counts, path, top 3 titles per source.
+  const failed = (Object.keys(data.health) as Source[]).filter(
+    (s) => data.health[s].status === "failed"
+  );
+
   const summary = {
     path: outPath,
     counts: { hn: data.hn.length, reddit: data.reddit.length, github: data.github.length },
+    health: data.health,
+    failed_sources: failed,
     top: {
       hn: data.hn.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
       reddit: data.reddit.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),

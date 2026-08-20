@@ -24,7 +24,12 @@ Today's date: use the current date in `YYYY-MM-DD` format for filenames and mong
 
 ### 1. Fetch raw signals
 
-Run `bun run fetch` via Bash. It writes the full payload to `data/fetch-<today>.json` and prints only a compact summary (counts + top-3 titles per source + file path) to stdout. Read the JSON file with the `Read` tool to get the full items. Expect ~20-45 items total. If all counts are zero, send an "all sources empty" note to Telegram via `bun run send` and exit.
+Run `bun run fetch` via Bash. It writes the full payload to `data/fetch-<today>.json` and prints a compact summary to stdout: counts, per-source `health`, `failed_sources`, top-3 titles per source, and the file path. Read the JSON file with the `Read` tool to get the full items. Expect ~20-45 items total.
+
+Check `failed_sources` before anything else. A source is `failed` only when every request to it errored — that is a broken pipe, not a quiet news day, and it must never pass silently:
+
+- **Every source failed or empty** — send an "all sources empty" note via `bun run send` and exit.
+- **Some sources failed** — continue and build the brief from what did return, but you MUST open the brief with a one-line health warning naming each failed source and its `health[source].note` (e.g. "⚠️ Sources degraded: github — GITHUB_TOKEN rejected (401); reddit — 403. Brief is HN-only."). Repeat that warning in the Discord message so it is visible without opening the brief file.
 
 ### 2. Dedupe against `seen_items`
 
