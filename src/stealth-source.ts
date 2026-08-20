@@ -111,18 +111,29 @@ export type StealthRunner = (
 const stealthId = (url: string) =>
   "stealth:" + new Bun.CryptoHasher("sha1").update(url).digest("hex").slice(0, 16);
 
+// Camoufox browser automation is hang-prone and this runs unattended at
+// 06:30 — a stuck s.fetch() must not block the brief indefinitely. Generous
+// so it only trips on a genuine hang, not on 8 slowish subreddit pages.
+const STEALTH_SPAWN_TIMEOUT_MS = 180_000;
+
 async function spawnStealthCli(urls: string[]) {
   const proc = Bun.spawn(["python3", "scripts/stealth-fetch.py"], {
     stdin: new TextEncoder().encode(urls.join("\n")),
     stdout: "pipe",
     stderr: "pipe",
     cwd: import.meta.dir + "/..", // repo root, so the script path resolves regardless of caller cwd
+    timeout: STEALTH_SPAWN_TIMEOUT_MS,
   });
   const out = await new Response(proc.stdout).text();
-  const code = await proc.exited;
-  if (code !== 0) {
+  await proc.exited;
+  // A timeout kill can leave exitCode null rather than nonzero, so check
+  // exitCode/signalCode directly instead of trusting the exited-code alone.
+  if (proc.exitCode !== 0 || proc.signalCode) {
     const err = await new Response(proc.stderr).text();
-    throw new Error(`stealth-fetch.py exited ${code}: ${err.trim()}`);
+    const reason = proc.signalCode
+      ? `timed out after ${STEALTH_SPAWN_TIMEOUT_MS}ms (killed with ${proc.signalCode})`
+      : `exited ${proc.exitCode}`;
+    throw new Error(`stealth-fetch.py ${reason}: ${err.trim()}`);
   }
   return JSON.parse(out) as Awaited<ReturnType<StealthRunner>>;
 }
