@@ -5,12 +5,16 @@ import {
   ghId,
   sourceStatus,
   fetchGitHub,
-  fetchReddit,
   fetchAllSources,
 } from "../sources.ts";
 
 const blockedFetch = (status: number) =>
   (async () => new Response("blocked", { status })) as unknown as typeof fetch;
+
+// Reddit now flows through the stealth browser tier, never fetchFn — every
+// fetchAllSources test MUST inject stealthRun or it will spawn the real Python CLI.
+const failingStealth = async (urls: string[]) =>
+  urls.map((url) => ({ url, status: 403, body: "", error: "blocked" }));
 
 describe("id helpers", () => {
   test("hnId prefixes with hn:", () => {
@@ -102,18 +106,9 @@ describe("fetchGitHub auth fallback", () => {
   });
 });
 
-describe("fetchReddit", () => {
-  test("a 403 on every request is failed, not a quiet day", async () => {
-    const result = await fetchReddit({ fetchFn: blockedFetch(403) });
-
-    expect(result.status).toBe("failed");
-    expect(result.items).toHaveLength(0);
-  });
-});
-
 describe("fetchAllSources health", () => {
   test("reports per-source health so a broken pipe is not read as no news", async () => {
-    const data = await fetchAllSources({ fetchFn: blockedFetch(403) });
+    const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun: failingStealth });
 
     expect(data.health.github.status).toBe("failed");
     expect(data.health.reddit.status).toBe("failed");
@@ -121,11 +116,30 @@ describe("fetchAllSources health", () => {
   });
 
   test("keeps the item arrays at the top level for the brief payload", async () => {
-    const data = await fetchAllSources({ fetchFn: blockedFetch(403) });
+    const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun: failingStealth });
 
     expect(Array.isArray(data.hn)).toBe(true);
     expect(Array.isArray(data.reddit)).toBe(true);
     expect(Array.isArray(data.github)).toBe(true);
+    expect(Array.isArray(data.stealth)).toBe(true);
+  });
+
+  test("fetchAllSources exposes an independent stealth tier", async () => {
+    const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun: failingStealth });
+    expect(data.health.stealth).toBeDefined();
+    expect(Array.isArray(data.stealth)).toBe(true);
+  });
+
+  test("reddit items arrive via the stealth runner, not fetchFn", async () => {
+    const redditBody = `<div class=" thing link" data-fullname="t3_r1" data-subreddit="LocalLLaMA"
+        data-permalink="/r/LocalLLaMA/comments/r1/x/" data-score="2" data-comments-count="0"
+        data-timestamp="1000" data-promoted="false">
+        <a data-event-action="title" href="/r/LocalLLaMA/comments/r1/x/">Via stealth</a></div>`;
+    const stealthRun = async (urls: string[]) =>
+      urls.map((url) => ({ url, status: 200, body: url.includes("reddit") ? redditBody : "", error: null }));
+    const data = await fetchAllSources({ fetchFn: blockedFetch(403), stealthRun });
+    expect(data.reddit.some((i) => i.id === "reddit:r1")).toBe(true);
+    expect(data.health.reddit.status).toBe("ok");
   });
 
   // Regression: the 2026-07-10 production failure. GitHub's token expired and
@@ -164,7 +178,7 @@ describe("fetchAllSources health", () => {
       return new Response(ghPayload, { status: 200 });
     }) as unknown as typeof fetch;
 
-    const data = await fetchAllSources({ token: "expired-pat", fetchFn });
+    const data = await fetchAllSources({ token: "expired-pat", fetchFn, stealthRun: failingStealth });
 
     expect(data.health.hackernews.status).toBe("ok");
     expect(data.health.reddit.status).toBe("failed");

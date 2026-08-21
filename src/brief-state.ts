@@ -31,7 +31,7 @@ try {
     const path = process.argv[3];
     if (!path) { console.error("usage: brief-state dedupe <fetch-json-path>"); process.exit(1); }
     const raw = JSON.parse(await Bun.file(path).text());
-    const items = [...(raw.hn ?? []), ...(raw.reddit ?? []), ...(raw.github ?? [])];
+    const items = [...(raw.hn ?? []), ...(raw.reddit ?? []), ...(raw.github ?? []), ...(raw.stealth ?? [])];
     const ids = items.map((i: any) => i.id);
     const existing = await db
       .collection("seen_items")

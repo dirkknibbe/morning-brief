@@ -6,7 +6,10 @@
  * as JSON on stdout.
  */
 
-export type Source = "hackernews" | "reddit" | "github";
+import { fetchStealth, type StealthRunner } from "./stealth-source.ts";
+import { redditTarget, BLOG_TARGETS } from "./stealth-targets.ts";
+
+export type Source = "hackernews" | "reddit" | "github" | "stealth";
 
 export interface RawItem {
   id: string;               // stable: "hn:123", "reddit:abc", "gh:owner/repo"
@@ -45,6 +48,7 @@ export interface FetchResult {
 export interface FetchDeps {
   token?: string;
   fetchFn?: typeof fetch;
+  stealthRun?: StealthRunner;
 }
 
 // ── ID helpers (pure, tested) ─────────────────────────────────────────
@@ -113,8 +117,11 @@ export async function fetchHackerNews(deps: FetchDeps = {}): Promise<FetchResult
 }
 
 // ── Reddit ────────────────────────────────────────────────────────────
+// Legacy JSON fetch (fetchReddit/redditFetch/REDDIT_SEARCHES) is gone —
+// old.reddit.com/*.json is 403 with no working fallback. Reddit now flows
+// through the stealth browser tier (see REDDIT_TARGETS below + fetchAllSources).
 
-const SUBREDDITS = [
+export const SUBREDDITS = [
   "MachineLearning",
   "LocalLLaMA",
   "artificial",
@@ -125,98 +132,10 @@ const SUBREDDITS = [
   "selfhosted",
 ];
 
-const REDDIT_SEARCHES = [
-  { sub: "all", q: "MCP server agent" },
-  { sub: "all", q: "AI agent tool API" },
-  { sub: "all", q: "browser automation LLM" },
-  { sub: "all", q: "micropayment API developer" },
-];
-
-async function redditFetch(url: string, doFetch: typeof fetch): Promise<any> {
-  const res = await doFetch(url, {
-    headers: { "User-Agent": "MorningBrief/2.0" },
-  });
-  if (!res.ok) throw new Error(`Reddit ${res.status}`);
-  return res.json();
-}
-
-export async function fetchReddit(deps: FetchDeps = {}): Promise<FetchResult> {
-  const doFetch = deps.fetchFn ?? fetch;
-  const items: RawItem[] = [];
-  const seen = new Set<string>();
-  let errors = 0;
-
-  for (const sub of SUBREDDITS) {
-    try {
-      const data = await redditFetch(
-        `https://old.reddit.com/r/${sub}/hot.json?limit=10&t=day`,
-        doFetch
-      );
-      for (const child of data?.data?.children ?? []) {
-        const post = child.data;
-        if (!post || post.stickied) continue;
-        const id = redditId(post.id);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        items.push({
-          id,
-          source: "reddit",
-          sourceLabel: `reddit/r/${sub}`,
-          title: post.title,
-          url: `https://reddit.com${post.permalink}`,
-          score: post.score,
-          comments: post.num_comments,
-          summary: post.selftext?.slice(0, 300) || undefined,
-          timestamp: post.created_utc,
-        });
-      }
-    } catch (e) {
-      errors++;
-      console.warn(`[Reddit] r/${sub} failed:`, (e as Error).message);
-    }
-  }
-
-  for (const { sub, q } of REDDIT_SEARCHES) {
-    try {
-      const data = await redditFetch(
-        `https://old.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(
-          q
-        )}&sort=new&t=day&limit=5`,
-        doFetch
-      );
-      for (const child of data?.data?.children ?? []) {
-        const post = child.data;
-        if (!post) continue;
-        const id = redditId(post.id);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        items.push({
-          id,
-          source: "reddit",
-          sourceLabel: `reddit/r/${post.subreddit}`,
-          title: post.title,
-          url: `https://reddit.com${post.permalink}`,
-          score: post.score,
-          comments: post.num_comments,
-          summary: post.selftext?.slice(0, 300) || undefined,
-          timestamp: post.created_utc,
-        });
-      }
-    } catch (e) {
-      errors++;
-      console.warn(`[Reddit] search "${q}" failed:`, (e as Error).message);
-    }
-  }
-
-  return {
-    items: items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 15),
-    status: sourceStatus({
-      items: items.length,
-      errors,
-      attempts: SUBREDDITS.length + REDDIT_SEARCHES.length,
-    }),
-  };
-}
+// Built here (not in stealth-targets.ts) to avoid an ESM import cycle:
+// stealth-targets.ts must not import SUBREDDITS from this file, since this
+// file also imports from stealth-targets.ts (see header comment there).
+const REDDIT_TARGETS = SUBREDDITS.map(redditTarget);
 
 // ── GitHub ────────────────────────────────────────────────────────────
 
@@ -326,26 +245,31 @@ export async function fetchAllSources(deps: FetchDeps = {}): Promise<{
   hn: RawItem[];
   reddit: RawItem[];
   github: RawItem[];
+  stealth: RawItem[];
   health: Record<Source, SourceHealth>;
 }> {
-  const [hn, reddit, github] = await Promise.allSettled([
+  const [hn, github, reddit, stealth] = await Promise.allSettled([
     fetchHackerNews(deps),
-    fetchReddit(deps),
     fetchGitHub(deps),
+    fetchStealth(REDDIT_TARGETS, { run: deps.stealthRun, fetchFn: deps.fetchFn }),
+    fetchStealth(BLOG_TARGETS, { run: deps.stealthRun, fetchFn: deps.fetchFn }),
   ]);
   const results = {
     hackernews: settled(hn),
-    reddit: settled(reddit),
     github: settled(github),
+    reddit: settled(reddit),
+    stealth: settled(stealth),
   };
   return {
     hn: results.hackernews.items,
     reddit: results.reddit.items,
     github: results.github.items,
+    stealth: results.stealth.items,
     health: {
       hackernews: health(results.hackernews),
       reddit: health(results.reddit),
       github: health(results.github),
+      stealth: health(results.stealth),
     },
   };
 }
@@ -359,7 +283,7 @@ if (import.meta.main) {
   const data = await fetchAllSources();
 
   // Truncate summaries in-place so downstream consumers don't eat huge blobs.
-  for (const arr of [data.hn, data.reddit, data.github]) {
+  for (const arr of [data.hn, data.reddit, data.github, data.stealth]) {
     for (const it of arr) {
       if (it.summary && it.summary.length > 240) it.summary = it.summary.slice(0, 240) + "…";
     }
@@ -377,13 +301,19 @@ if (import.meta.main) {
 
   const summary = {
     path: outPath,
-    counts: { hn: data.hn.length, reddit: data.reddit.length, github: data.github.length },
+    counts: {
+      hn: data.hn.length,
+      reddit: data.reddit.length,
+      github: data.github.length,
+      stealth: data.stealth.length,
+    },
     health: data.health,
     failed_sources: failed,
     top: {
       hn: data.hn.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
       reddit: data.reddit.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
       github: data.github.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
+      stealth: data.stealth.slice(0, 3).map((i) => ({ id: i.id, title: i.title, score: i.score })),
     },
   };
   process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
