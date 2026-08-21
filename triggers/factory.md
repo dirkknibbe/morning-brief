@@ -56,6 +56,11 @@ Invoke the `superpowers:writing-plans` skill to draft a plan covering ONLY the `
 ## Step 5 — iteration loop
 Track: `round` (start 1), `START_EPOCH=$(date +%s)`, the per-round `failing_test_count` list, and the per-round `hypothesis` list.
 
+**Before the first round, post one opening heartbeat** so the build thread shows the build is live. A first-pass-green build otherwise sends NOTHING to the thread until it finishes (the per-round heartbeat below only fires on a round that has failures), so the thread looks dead/broken while the build is actually working:
+```bash
+printf '%s' "🏭 $IDEA_SLUG — repo scaffolded + plan committed, starting the build loop" | (cd "$MB_REPO" && bun run send)
+```
+
 Each round:
 1. Run the machine-verifiable suite (tests + scriptable assertions); count failing criteria.
 2. **Zero failing → go to Step 6 (done).**
