@@ -28,3 +28,31 @@ export function formatElapsed(elapsedMs: number): string {
   if (totalMinutes > 0) return `${totalMinutes}m ${totalSeconds % SECONDS_PER_MINUTE}s`;
   return `${totalSeconds}s`;
 }
+
+/** Minimal shape /factory-status needs from the factory lock. */
+export interface FactoryLockView {
+  readonly idea_slug: string;
+  readonly started_at: string;
+}
+
+/**
+ * /factory-status reply. `startupAlive` is true when `/build` has launched a
+ * factory whose process group is still alive but which hasn't acquired the
+ * Mongo lock yet — the ~45s claude-boot window. Without that branch the status
+ * lies "no build running" for the first ~45s after `/build`, which reads as a
+ * broken build.
+ */
+export function factoryStatusReply(
+  lock: FactoryLockView | null,
+  startupAlive: boolean,
+  now: number,
+): string {
+  if (lock) {
+    const elapsed = formatElapsed(now - new Date(lock.started_at).getTime());
+    return `🏭 ${lock.idea_slug} running for ~${elapsed}\n\nPer-round heartbeats land in the build thread in the factory channel.`;
+  }
+  if (startupAlive) {
+    return "🏭 a build is starting up (acquiring the lock) — check again in a few seconds";
+  }
+  return "no build running";
+}
