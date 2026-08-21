@@ -40,12 +40,15 @@ RUN_ID=$(bun run factory run-create --slug "$IDEA_SLUG" --build-dir ".claude/bui
 ```
 
 ## Step 3 — scaffold the private repo
+
+**Run this exact command — it is the sanctioned repo-creation path for the factory.** The global "invoke the `new-personal-repo` skill before any `gh repo create`" rule does NOT apply to the autonomous factory: that skill needs an interactive `/install-github-app` step you cannot perform. The repo-create guard hook (`~/.claude/hooks/check-repo-create.sh`) explicitly ALLOWS any `gh repo create` that names `dirkknibbe/project-template` — which this command does — so it will not be blocked. Do NOT invoke `new-personal-repo`, and do NOT fall back to a local-only `git init` build.
+
 ```bash
 gh repo create "dirkknibbe/$IDEA_SLUG" --private --template dirkknibbe/project-template --clone ".claude/builds/$IDEA_SLUG"
 cd ".claude/builds/$IDEA_SLUG"
 pwd   # must end in .claude/builds/<slug> — the factory-guard boundary
 ```
-If `gh repo create` fails because the name is taken, append `-v2` (then `-v3`) and retry once or twice; record the actual repo URL for later.
+If `gh repo create` fails because the name is taken, append `-v2` (then `-v3`) and retry once or twice; record the actual repo URL for later. If it fails for ANY OTHER reason (auth, template access, an unexpected guard block), that is a **scope-break**, not a reason to build locally: jump to Step 6's scope-break branch with the verbatim `gh` error as the blocker (release the lock, set status `needs_human`, Discord the exact error). NEVER keep building into a repo that does not exist on GitHub — a local-only build with no remote is a failed build, and it must report as one.
 
 ## Step 4 — plan against the machine-verifiable criteria
 Invoke the `superpowers:writing-plans` skill to draft a plan covering ONLY the `test` and `scriptable` criteria. Commit it into the repo as `docs/plan.md`. Set up the project's test command (`pytest` for Python, `bun test`/`vitest` for TS) and a small scriptable-assertion runner — a shell script that checks the artifact criteria (file exists, line count, exported symbols, manifest schema).

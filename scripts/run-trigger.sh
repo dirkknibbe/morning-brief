@@ -53,6 +53,16 @@ if [ -f .env ]; then
   set +a
 fi
 
+# The factory creates + pushes GitHub repos. .env's GITHUB_TOKEN is a limited PAT
+# WITHOUT repo-create permission, and gh/git prefer an env token over the keyring
+# login — so `gh repo create` 403s and every build falls back to a local-only
+# repo. GITHUB_TOKEN only exists to raise the brief fetchers' search rate limit,
+# which the factory doesn't use, so drop it here: gh then uses the keyring login
+# (classic token, `repo` scope) that CAN create and push repos.
+if [ "$STEM" = "factory" ]; then
+  unset GH_TOKEN GITHUB_TOKEN
+fi
+
 # launchd starts with a minimal PATH. Add the spots Dirk's tools live.
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
