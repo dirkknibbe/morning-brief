@@ -12,7 +12,15 @@
  *   bun run scripts/discord-listener.ts [--once]
  */
 
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { MongoClient } from "mongodb";
 import {
@@ -62,6 +70,15 @@ const ONCE_MODE_MAX_LOGIN_ATTEMPTS = 3;
 const AUTOCOMPLETE_MAX_CHOICES = 25;
 const THREAD_NAME_MAX_LEN = 100;
 
+// Self-heal: exit after this long so launchd KeepAlive restarts us on a FRESH
+// gateway session. A long-lived shard can silently rot — resuming the socket but
+// no longer delivering INTERACTION_CREATE (observed after a 41-day run: /build
+// went silent). Recoverable resumes never trip installFatalGatewayHandlers, so
+// without this the daemon degrades in place. Override with LISTENER_MAX_UPTIME_MS
+// (0 disables). A restart is a ~2.4s reconnect; a running build is detached and
+// unaffected.
+const DEFAULT_MAX_UPTIME_MS = 6 * 60 * 60 * 1000; // 6h
+
 const STATIC_REPLY = [
   "I'm the morning-brief daemon — I only do slash commands:",
   "`/build slug` — start a factory build (slug autocompletes from queued ideas)",
@@ -90,6 +107,25 @@ function log(level: "info" | "warn" | "error", message: string): void {
     appendFileSync(join(LOG_DIR, `listener-${localDateStem()}.log`), `${line}\n`);
   } catch {
     // stdout already has the line; never crash the daemon over log I/O
+  }
+}
+
+// launchd appends this daemon's stdout to logs/launchd-listener.out across EVERY
+// restart, so it grows without bound (observed at 481MB after a 41-day run).
+// Truncate it on startup when it's over the cap — the daily listener-<date>.log
+// keeps the real history, and process guards still surface crashes there.
+const LAUNCHD_OUT_PATH = join(LOG_DIR, "launchd-listener.out");
+const LAUNCHD_OUT_CAP_BYTES = 50 * 1024 * 1024; // 50 MB
+
+function capLaunchdLog(): void {
+  try {
+    const { size } = statSync(LAUNCHD_OUT_PATH);
+    if (size > LAUNCHD_OUT_CAP_BYTES) {
+      truncateSync(LAUNCHD_OUT_PATH, 0);
+      log("info", `truncated ${LAUNCHD_OUT_PATH} — was ${size} bytes, over ${LAUNCHD_OUT_CAP_BYTES} cap`);
+    }
+  } catch {
+    // no launchd out file (e.g. run by hand) — log hygiene must never block startup
   }
 }
 
@@ -734,6 +770,7 @@ async function waitForReady(client: Client): Promise<void> {
 async function main(): Promise<void> {
   const onceMode = process.argv.includes("--once");
   mkdirSync(LOG_DIR, { recursive: true });
+  capLaunchdLog(); // bound the launchd stdout file before it can balloon again
 
   let config: DiscordConfig;
   try {
@@ -756,6 +793,16 @@ async function main(): Promise<void> {
     await closeMongo();
     log("info", "--once smoke OK");
     process.exit(0);
+  }
+
+  // Daemon mode: schedule a fresh-session restart so a rotted shard can't linger.
+  const raw = process.env.LISTENER_MAX_UPTIME_MS;
+  const maxUptimeMs = raw !== undefined && raw !== "" ? Number(raw) : DEFAULT_MAX_UPTIME_MS;
+  if (Number.isFinite(maxUptimeMs) && maxUptimeMs > 0) {
+    setTimeout(() => {
+      log("info", `max uptime reached (${maxUptimeMs}ms) — exiting for a fresh gateway session; launchd KeepAlive restarts`);
+      process.exit(0);
+    }, maxUptimeMs).unref(); // the client keeps the process alive; this timer must not
   }
 }
 
