@@ -56,26 +56,18 @@ LEADER_PGID=$!
 PGID_FILE="/tmp/morning-brief-factory.pgid"
 echo "$LEADER_PGID" > "$PGID_FILE"
 
-# Wall-clock watchdog. A factory run has no internal timeout on a stalled
-# MCP/API/tool call — one observed run sat idle ~33h, holding the lock and
-# blocking every other build (the 30min soft cap in factory.md only checks
-# BETWEEN rounds, so a hung round escapes it). Hard-kill the whole group after
-# a ceiling so a runaway can't wedge the factory; the killed group's lock then
-# reaps by liveness (see factory-lock.ts). Detached + output-discarded so it
-# outlives this launcher without holding its stdout pipe. FACTORY_MAX_WALL_S=0
-# disables it. Default 3600s = 60min (2x the 30min soft cap).
-FACTORY_MAX_WALL_S="${FACTORY_MAX_WALL_S:-3600}"
-if [ "$FACTORY_MAX_WALL_S" -gt 0 ] 2>/dev/null; then
-  (
-    sleep "$FACTORY_MAX_WALL_S"
-    if kill -0 -"$LEADER_PGID" 2>/dev/null; then
-      echo "$(date -Iseconds) factory watchdog: build exceeded ${FACTORY_MAX_WALL_S}s — killing group $LEADER_PGID" >>"$LOG"
-      kill -TERM -"$LEADER_PGID" 2>/dev/null
-      sleep 15
-      kill -KILL -"$LEADER_PGID" 2>/dev/null
-    fi
-  ) >/dev/null 2>&1 &
+# Idle-based watchdog (scripts/factory-watchdog.ts). Kills the build group when it
+# stops making PROGRESS — no CPU-time advance AND no new commit for the idle limit
+# — NOT on wall-clock alone, so a legitimately large build that keeps working runs
+# as long as it needs; only a genuine hang (one run sat idle ~33h) gets reaped.
+# An absolute ceiling is the final backstop. The killed group's lock then reaps by
+# liveness (src/factory-lock.ts), so the factory isn't wedged. Runs OUTSIDE the
+# factory's process group (a child of THIS launcher), detached + output to the log,
+# so it outlives the launcher and killing the group doesn't kill the watchdog.
+# FACTORY_WATCHDOG=0 disables; tune via FACTORY_WATCHDOG_{IDLE,CEILING,CHECK,CPU_THRESH}_S.
+if [ "${FACTORY_WATCHDOG:-1}" != "0" ]; then
+  bun run "$REPO_DIR/scripts/factory-watchdog.ts" "$LEADER_PGID" "$REPO_DIR/.claude/builds/$SLUG" >>"$LOG" 2>&1 &
   disown 2>/dev/null || true
 fi
 
-echo "started factory for $SLUG (log: $LOG, pgid: $LEADER_PGID, wall-cap: ${FACTORY_MAX_WALL_S}s)"
+echo "started factory for $SLUG (log: $LOG, pgid: $LEADER_PGID)"
