@@ -56,4 +56,26 @@ LEADER_PGID=$!
 PGID_FILE="/tmp/morning-brief-factory.pgid"
 echo "$LEADER_PGID" > "$PGID_FILE"
 
-echo "started factory for $SLUG (log: $LOG, pgid: $LEADER_PGID)"
+# Wall-clock watchdog. A factory run has no internal timeout on a stalled
+# MCP/API/tool call — one observed run sat idle ~33h, holding the lock and
+# blocking every other build (the 30min soft cap in factory.md only checks
+# BETWEEN rounds, so a hung round escapes it). Hard-kill the whole group after
+# a ceiling so a runaway can't wedge the factory; the killed group's lock then
+# reaps by liveness (see factory-lock.ts). Detached + output-discarded so it
+# outlives this launcher without holding its stdout pipe. FACTORY_MAX_WALL_S=0
+# disables it. Default 3600s = 60min (2x the 30min soft cap).
+FACTORY_MAX_WALL_S="${FACTORY_MAX_WALL_S:-3600}"
+if [ "$FACTORY_MAX_WALL_S" -gt 0 ] 2>/dev/null; then
+  (
+    sleep "$FACTORY_MAX_WALL_S"
+    if kill -0 -"$LEADER_PGID" 2>/dev/null; then
+      echo "$(date -Iseconds) factory watchdog: build exceeded ${FACTORY_MAX_WALL_S}s — killing group $LEADER_PGID" >>"$LOG"
+      kill -TERM -"$LEADER_PGID" 2>/dev/null
+      sleep 15
+      kill -KILL -"$LEADER_PGID" 2>/dev/null
+    fi
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+fi
+
+echo "started factory for $SLUG (log: $LOG, pgid: $LEADER_PGID, wall-cap: ${FACTORY_MAX_WALL_S}s)"
