@@ -44,5 +44,15 @@ LOG="logs/extract-$(date +%Y-%m-%d).log"
   echo "=== $(date -Iseconds) starting extract ==="
   echo "cwd=$PWD"
   bun run extract-ideas
-  echo "=== $(date -Iseconds) finished extract (exit $?) ==="
+  # Capture before any $(…) expansion — `$(date)` would reset $? to 0.
+  STATUS=$?
+
+  # Failed runs don't count toward the 21h dedupe (mirrors run-trigger.sh).
+  if [ "$STATUS" -ne 0 ]; then
+    echo "run failed; clearing dedupe marker so a retry isn't blocked"
+    rm -f "$LAST_RUN"
+  fi
+
+  echo "=== $(date -Iseconds) finished extract (exit $STATUS) ==="
+  exit "$STATUS"
 } >>"$LOG" 2>&1
