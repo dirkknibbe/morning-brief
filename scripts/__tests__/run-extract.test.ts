@@ -7,9 +7,14 @@ const SRC = readFileSync(new URL("../run-extract.sh", import.meta.url), "utf8");
 
 // Copy the wrapper into a sandbox repo, with a stub `bun` exiting `bunExit`.
 // The /tmp dedupe marker is redirected into the sandbox so the real one is untouched.
-async function runWrapper(bunExit: 0 | 1) {
+async function runWrapper(
+  bunExit: 0 | 1,
+  env: Record<string, string> = {},
+  opts: { freshMarker?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "run-extract-"));
   const marker = join(root, "last-run");
+  if (opts.freshMarker) writeFileSync(marker, "");
   mkdirSync(join(root, "scripts"));
   writeFileSync(
     join(root, "scripts/run-extract.sh"),
@@ -22,13 +27,15 @@ async function runWrapper(bunExit: 0 | 1) {
   symlinkSync(bunExit === 0 ? "/usr/bin/true" : "/usr/bin/false", join(bunDir, "bun"));
 
   const p = Bun.spawn(["bash", join(root, "scripts/run-extract.sh")], {
-    env: { HOME: join(root, "home"), PATH: "/usr/bin:/bin" },
+    env: { HOME: join(root, "home"), PATH: "/usr/bin:/bin", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
   const code = await p.exited;
-  const logFile = readdirSync(join(root, "logs"))[0];
-  const log = readFileSync(join(root, "logs", logFile), "utf8");
+  // A skipped run exits before creating logs/, so a missing dir means no log.
+  const logsDir = join(root, "logs");
+  const logFile = existsSync(logsDir) ? readdirSync(logsDir)[0] : undefined;
+  const log = logFile ? readFileSync(join(logsDir, logFile), "utf8") : "";
   return { code, log, markerExists: existsSync(marker) };
 }
 
@@ -44,4 +51,16 @@ test("successful extract: exits 0 and keeps the dedupe marker", async () => {
   expect(r.code).toBe(0);
   expect(r.log).toContain("finished extract (exit 0)");
   expect(r.markerExists).toBe(true);
+});
+
+test("SKIP_DEDUPE=1: runs and leaves no marker behind", async () => {
+  const r = await runWrapper(0, { SKIP_DEDUPE: "1" }, { freshMarker: false });
+  expect(r.code).toBe(0);
+  expect(r.log).toContain("finished extract (exit 0)");
+  expect(r.markerExists).toBe(false);
+});
+
+test("SKIP_DEDUPE=1: a fresh marker does not cause a skip", async () => {
+  const r = await runWrapper(0, { SKIP_DEDUPE: "1" }, { freshMarker: true });
+  expect(r.log).toContain("starting extract");
 });
