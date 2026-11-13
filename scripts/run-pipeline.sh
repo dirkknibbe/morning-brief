@@ -35,8 +35,10 @@ mkdir -p logs/.done
 LOG="logs/pipeline-$DATE.log"
 log() { echo "$(date -Iseconds) $*" >>"$LOG"; }
 
-mkdir logs/.pipeline.lock 2>/dev/null || { log "another run in progress, exiting"; exit 0; }
-trap 'rmdir logs/.pipeline.lock' EXIT
+# Lock lives in /tmp so a reboot (power loss) clears it. ponytail: SIGKILL without reboot still leaves a stale lock; upgrade: PID check.
+LOCK="${PIPELINE_LOCK:-/tmp/morning-brief-pipeline.lock}"
+mkdir "$LOCK" 2>/dev/null || { log "another run in progress, exiting"; exit 0; }
+trap 'rmdir "$LOCK"' EXIT
 
 run_stage() {
   if [ "$1" = "extract" ]; then

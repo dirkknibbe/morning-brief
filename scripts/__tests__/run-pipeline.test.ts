@@ -29,7 +29,7 @@ async function runPipeline(o: { hour: string | number; failStage?: string; preDo
     mkdirSync(join(root, "briefs"));
     writeFileSync(join(root, `briefs/${DATE}.md`), "");
   }
-  if (o.preLock) mkdirSync(join(root, "logs/.pipeline.lock"));
+  if (o.preLock) mkdirSync(join(root, "lock"));
 
   const callsFile = join(root, "calls");
   const alertsFile = join(root, "alerts");
@@ -39,6 +39,7 @@ async function runPipeline(o: { hour: string | number; failStage?: string; preDo
     PIPELINE_DATE: DATE,
     PIPELINE_HOUR: String(o.hour),
     PIPELINE_SEND: `tee -a ${alertsFile}`,
+    PIPELINE_LOCK: join(root, "lock"),
     CALLS_FILE: callsFile,
     FAIL_STAGE: o.failStage ?? "",
     NO_BRIEF_FILE: o.noBriefFile ? "1" : "",
