@@ -7,6 +7,13 @@
 # run would be dated tomorrow. The 17:xx tick also sends one "incomplete" alert.
 # Why logs/.done and not /tmp: /tmp is wiped on reboot, which would re-run finished stages.
 #
+# Why the brief stage is artifact-based: `claude --print` exits 0 even when the trigger failed
+# in-session (e.g. Discord delivery), and the trigger archives briefs/<date>.md only after
+# delivery. So for scheduled-brief, "done" = briefs/$DATE.md exists, not the exit code.
+# (Local DATE equals Claude's UTC label for every hour in the 06-17 CST/CDT window.)
+# ponytail: no per-stage timeout; a hung stage blocks the rest of the day (upgrade: gtimeout).
+# ponytail: a first success at 17:5x can run downstream stages past 18:00 CST, the UTC date boundary.
+#
 # Env test seams: PIPELINE_DATE, PIPELINE_HOUR, PIPELINE_SEND (command that reads stdin).
 # Exit: 0 = all done / outside window / nothing to do; 1 = a stage failed this run.
 
@@ -28,6 +35,9 @@ mkdir -p logs/.done
 LOG="logs/pipeline-$DATE.log"
 log() { echo "$(date -Iseconds) $*" >>"$LOG"; }
 
+mkdir logs/.pipeline.lock 2>/dev/null || { log "another run in progress, exiting"; exit 0; }
+trap 'rmdir logs/.pipeline.lock' EXIT
+
 run_stage() {
   if [ "$1" = "extract" ]; then
     SKIP_DEDUPE=1 bash "$SCRIPT_DIR/run-extract.sh"
@@ -39,11 +49,19 @@ run_stage() {
 FAILED=0
 for stem in $STAGES; do
   marker="logs/.done/$DATE-$stem"
+  if [ "$stem" = "scheduled-brief" ] && [ -f "briefs/$DATE.md" ]; then
+    touch "$marker"
+  fi
   if [ -f "$marker" ]; then
     log "skipped $stem (done)"
     continue
   fi
-  if run_stage "$stem"; then
+  run_stage "$stem"
+  rc=$?
+  if [ "$stem" = "scheduled-brief" ]; then
+    [ -f "briefs/$DATE.md" ] && rc=0 || rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
     touch "$marker"
     log "ran $stem"
   else

@@ -11,11 +11,12 @@ const DATE = "2026-11-12";
 const STUB = `
 stem="$(basename "\${1:-extract}" .md)"
 echo "$stem skip=\${SKIP_DEDUPE:-unset}" >> "$CALLS_FILE"
+if [ "$stem" = "scheduled-brief" ] && [ -z "\${NO_BRIEF_FILE:-}" ]; then mkdir -p briefs && touch "briefs/$PIPELINE_DATE.md"; fi
 [ "$stem" = "\${FAIL_STAGE:-}" ] && exit 1
 exit 0
 `;
 
-async function runPipeline(o: { hour: string | number; failStage?: string; preDone?: string[]; runs?: number }) {
+async function runPipeline(o: { hour: string | number; failStage?: string; preDone?: string[]; runs?: number; noBriefFile?: boolean; preBrief?: boolean; preLock?: boolean }) {
   const root = mkdtempSync(join(tmpdir(), "run-pipeline-"));
   mkdirSync(join(root, "scripts"));
   writeFileSync(join(root, "scripts/run-pipeline.sh"), SRC);
@@ -23,6 +24,12 @@ async function runPipeline(o: { hour: string | number; failStage?: string; preDo
   writeFileSync(join(root, "scripts/run-extract.sh"), STUB);
   mkdirSync(join(root, "logs/.done"), { recursive: true });
   for (const s of o.preDone ?? []) writeFileSync(join(root, `logs/.done/${DATE}-${s}`), "");
+
+  if (o.preBrief) {
+    mkdirSync(join(root, "briefs"));
+    writeFileSync(join(root, `briefs/${DATE}.md`), "");
+  }
+  if (o.preLock) mkdirSync(join(root, "logs/.pipeline.lock"));
 
   const callsFile = join(root, "calls");
   const alertsFile = join(root, "alerts");
@@ -34,6 +41,7 @@ async function runPipeline(o: { hour: string | number; failStage?: string; preDo
     PIPELINE_SEND: `tee -a ${alertsFile}`,
     CALLS_FILE: callsFile,
     FAIL_STAGE: o.failStage ?? "",
+    NO_BRIEF_FILE: o.noBriefFile ? "1" : "",
   };
   const codes: number[] = [];
   for (let i = 0; i < (o.runs ?? 1); i++) {
@@ -65,10 +73,10 @@ test("skips done stages", async () => {
 });
 
 test("stops at first failure", async () => {
-  const r = await runPipeline({ hour: 9, failStage: "scheduled-brief" });
-  expect(r.calls).toEqual(["scheduled-brief"]);
+  const r = await runPipeline({ hour: 9, failStage: "action-research" });
+  expect(r.calls).toEqual(["scheduled-brief", "action-research"]);
   expect(r.codes).toEqual([1]);
-  expect(r.done).toEqual([]);
+  expect(r.done).toEqual([`${DATE}-scheduled-brief`]);
 });
 
 test("resumes from the failed stage next hour", async () => {
@@ -103,4 +111,30 @@ test("no alert when complete at 17", async () => {
 
 test("no alert before 17", async () => {
   expect((await runPipeline({ hour: 16, failStage: "extract" })).alerts).toBe("");
+});
+
+test("brief exit 0 without briefs/<date>.md is a failure", async () => {
+  const r = await runPipeline({ hour: 9, noBriefFile: true });
+  expect(r.calls).toEqual(["scheduled-brief"]);
+  expect(r.done).toEqual([]);
+  expect(r.codes).toEqual([1]);
+});
+
+test("brief file present means done even if wrapper would exit 1", async () => {
+  const r = await runPipeline({ hour: 9, failStage: "scheduled-brief", preBrief: true });
+  expect(r.calls).toEqual(ALL.slice(1));
+  expect(r.done).toContain(`${DATE}-scheduled-brief`);
+  expect(r.codes).toEqual([0]);
+});
+
+test("brief wrapper exit 1 but file written still counts as done", async () => {
+  const r = await runPipeline({ hour: 9, failStage: "scheduled-brief" });
+  expect(r.calls).toEqual(ALL);
+  expect(r.done).toContain(`${DATE}-scheduled-brief`);
+});
+
+test("existing lock means exit 0 and no work", async () => {
+  const r = await runPipeline({ hour: 9, preLock: true });
+  expect(r.calls).toEqual([]);
+  expect(r.codes).toEqual([0]);
 });
