@@ -5,6 +5,10 @@
 # ride run-trigger.sh. This mirrors run-trigger.sh's env handling + 21h dedupe
 # guard so launchd can schedule it and RunAtLoad re-fires don't redo a run
 # that already happened today.
+#
+# Env knobs:
+#   SKIP_DEDUPE=1     bypass the 21h dedupe guard (on-demand runs, e.g. the
+#                     hourly runner). The marker is neither read nor written.
 
 set -u
 
@@ -16,15 +20,18 @@ STEM="extract"
 # Time-based dedupe: skip if extract ran within the last 21 hours (mirrors
 # run-trigger.sh). 21h < 24h so consecutive daily 06:xx runs aren't blocked,
 # but a RunAtLoad/login re-fire on the same day is.
-LAST_RUN="/tmp/morning-brief-${STEM}-last-run"
-if [ -f "$LAST_RUN" ]; then
-  AGE=$(( $(date +%s) - $(stat -f %m "$LAST_RUN") ))
-  if [ "$AGE" -lt 75600 ]; then
-    echo "$(date -Iseconds) extract ran ${AGE}s ago (< 21h), skipping" >&2
-    exit 0
+# LAST_RUN stays unset when SKIP_DEDUPE=1, so the failure path below leaves the marker alone.
+if [ "${SKIP_DEDUPE:-0}" != "1" ]; then
+  LAST_RUN="/tmp/morning-brief-${STEM}-last-run"
+  if [ -f "$LAST_RUN" ]; then
+    AGE=$(( $(date +%s) - $(stat -f %m "$LAST_RUN") ))
+    if [ "$AGE" -lt 75600 ]; then
+      echo "$(date -Iseconds) extract ran ${AGE}s ago (< 21h), skipping" >&2
+      exit 0
+    fi
   fi
+  touch "$LAST_RUN"
 fi
-touch "$LAST_RUN"
 
 # Load .env (KEY=value and KEY="value" both work).
 if [ -f .env ]; then
@@ -48,7 +55,7 @@ LOG="logs/extract-$(date +%Y-%m-%d).log"
   STATUS=$?
 
   # Failed runs don't count toward the 21h dedupe (mirrors run-trigger.sh).
-  if [ "$STATUS" -ne 0 ]; then
+  if [ "$STATUS" -ne 0 ] && [ -n "${LAST_RUN:-}" ]; then
     echo "run failed; clearing dedupe marker so a retry isn't blocked"
     rm -f "$LAST_RUN"
   fi
